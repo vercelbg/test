@@ -20,7 +20,7 @@ jobs:
       - name: Install Native Compilation Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build perl
+          sudo apt-get install -y cmake ninja-build perl pkg-config
 
       # 3. Setup Rust and add the Android 64-bit target
       - name: Set up Rust & Android Target
@@ -44,31 +44,41 @@ jobs:
           
           mkdir -p dist
           
-          # Dynamic toolchain mappings tailored to NDK r27d matching API 34+ guidelines
+          # Setup Toolchain Environment Paths for NDK r27d
           export TOOLCHAIN=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64
           export CC=$TOOLCHAIN/bin/aarch64-linux-android34-clang
           export CXX=$TOOLCHAIN/bin/aarch64-linux-android34-clang++
           export AR=$TOOLCHAIN/bin/llvm-ar
           export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
           
-          # Pass the linker configurations explicitly to Cargo
+          # Map compilation link arrays explicitly to Cargo
           export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$CC
-          
-          # Explicit target environments for inner CMake builds (picoquic)
           export CMAKE_GENERATOR=Ninja
 
-          # Tell inner C dependencies (picoquic/picotls) to compile using the NDK architecture layout
-          export CMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake
-          export ANDROID_ABI=arm64-v8a
-          export ANDROID_PLATFORM=android-34
+          # --- BUGFIX FOR OPENSSL PATHS ---
+          # Tell cargo-sys compilation modules to build a sandboxed copy from scratch
+          export OPENSSL_STATIC=1
+          export OPENSSL_VENDORED=1
+          
+          # Trigger an explicit early isolation build for the core openssl-sys workspace layer
+          cargo build --release --target aarch64-linux-android -p openssl-sys
 
-          # Build both packages using the modern boringssl backend compilation features
+          # Dynamically map whatever randomized hash directory Cargo used for the compilation
+          export OPENSSL_ROOT_DIR=$(ls -d $(pwd)/target/aarch64-linux-android/release/build/openssl-sys-*/out/openssl-build/install 2>/dev/null | head -n 1)
+          
+          # Explicitly export the directory maps directly into CMake global environments
+          export OPENSSL_INCLUDE_DIR="$OPENSSL_ROOT_DIR/include"
+          export OPENSSL_CRYPTO_LIBRARY="$OPENSSL_ROOT_DIR/lib/libcrypto.a"
+          export OPENSSL_SSL_LIBRARY="$OPENSSL_ROOT_DIR/lib/libssl.a"
+          
+          # Inject the paths into the global Rust Compiler flags so inner build scripts match them
+          export RUSTFLAGS="-L native=$OPENSSL_ROOT_DIR/lib -I $OPENSSL_INCLUDE_DIR"
+
+          # Build both binaries inside the clean repository workspace
           cargo build --release \
             --target aarch64-linux-android \
             -p slipstream-client \
-            -p slipstream-server \
-            --no-default-features \
-            --features boringssl
+            -p slipstream-server
           
           # Move the compiled client binary to our distribution folder
           cp target/aarch64-linux-android/release/slipstream-client dist/slipstream-client-android-arm64
