@@ -50,6 +50,10 @@ jobs:
           export CXX=$TOOLCHAIN/bin/aarch64-linux-android34-clang++
           export AR=$TOOLCHAIN/bin/llvm-ar
           
+          # --- FIXED: LEGACY TOOLCHAIN INTERCEPT FOR OPENSSL ---
+          # Instructs OpenSSL's build automation to use the modern LLVM ranlib utility
+          export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
+          
           # Pass the linker configurations explicitly to Cargo
           export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$CC
           
