@@ -2,78 +2,308 @@ name: Build Slipstream Rust Core for Android
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
   pull_request:
-    branches: [ main, master ]
+    branches: [main, master]
 
 jobs:
   android-build:
     runs-on: ubuntu-latest
+
     steps:
-      # 1. Fetch code + include the crucial picoquic submodule
+      # ── 1. Checkout ────────────────────────────────────────────────────────
       - name: Checkout Code
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
-      # 2. Setup Build System Utilities for picoquic C dependencies
+      # ── 2. Host build tools ────────────────────────────────────────────────
       - name: Install Native Compilation Tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build perl pkg-config
+          sudo apt-get update -qq
+          sudo apt-get install -y cmake ninja-build perl pkg-config make
 
-      # 3. Setup Rust and add the Android 64-bit target
+      # ── 3. Rust + Android target ───────────────────────────────────────────
       - name: Set up Rust & Android Target
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: aarch64-linux-android
 
-      # 4. Setup Android NDK
+      # ── 4. Android NDK r27d ────────────────────────────────────────────────
       - name: Set up Android NDK
+        id: setup-ndk
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r27d
           link-to-sdk: true
 
-      # 5. Compile the Rust workspace for Android
-      - name: Compile Android ARM64 Binaries
+      # ── 5. Clone repo (with picoquic submodule) ────────────────────────────
+      - name: Clone slipstream-rust
+        run: git clone --recursive https://github.com/Mygod/slipstream-rust
+
+      # ── 6. Pre-build OpenSSL for aarch64-linux-android ────────────────────
+      #
+      # This is the key step that fixes the CMake/openssl-sys clash.
+      # We build OpenSSL ONCE with the NDK toolchain into a fixed prefix
+      # ($GITHUB_WORKSPACE/openssl-android). Then we tell BOTH parties where
+      # to find it:
+      #   • openssl-sys  →  OPENSSL_DIR  (skips its own vendored build)
+      #   • CMake/picoquic → CMAKE_PREFIX_PATH / OPENSSL_ROOT_DIR
+      #
+      - name: Build OpenSSL for Android aarch64
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: |
-          # Clone upstream and jump in
-          git clone --recursive https://github.com/Mygod/slipstream-rust
+          set -euo pipefail
+
+          TOOLCHAIN=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64
+          ANDROID_API=34
+
+          # ── download OpenSSL source ──────────────────────────────────────
+          OPENSSL_VERSION=3.3.2
+          curl -fsSL "https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz" \
+            | tar xz
+          cd "openssl-${OPENSSL_VERSION}"
+
+          # ── configure for Android aarch64 ───────────────────────────────
+          export ANDROID_NDK_ROOT           # required by OpenSSL's android script
+          export PATH="$TOOLCHAIN/bin:$PATH"
+
+          ./Configure android-arm64 \
+            -D__ANDROID_API__=${ANDROID_API} \
+            --prefix="${GITHUB_WORKSPACE}/openssl-android" \
+            --openssldir="${GITHUB_WORKSPACE}/openssl-android" \
+            no-shared \
+            no-tests
+
+          make -j"$(nproc)"
+          make install_sw        # installs include/ and lib/ only (fast)
+
+      # ── 7. Build Rust workspace ────────────────────────────────────────────
+      - name: Compile Android ARM64 Binaries
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          set -euo pipefail
           cd slipstream-rust
-          
-          mkdir -p dist
-          
-          # --- WORKSPACE TOML INJECTION ---
-          # Force the entire crate registry to look at our patched version of openssl-sys 
-          # by adding a global patch block to the bottom of Cargo.toml
-          echo -e "\n[patch.crates-io]\nopenssl-sys = { version = '0.9', features = ['vendored'] }" >> Cargo.toml
-          
-          # Setup Toolchain Environment Paths for NDK r27d
-          export TOOLCHAIN=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64
-          export CC=$TOOLCHAIN/bin/aarch64-linux-android34-clang
-          export CXX=$TOOLCHAIN/bin/aarch64-linux-android34-clang++
-          export AR=$TOOLCHAIN/bin/llvm-ar
-          export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
-          
-          # Map compilation link arrays explicitly to Cargo
-          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$CC
-          export CMAKE_GENERATOR=Ninja
 
-          # Force static linking flags globally 
+          TOOLCHAIN=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64
+          ANDROID_API=34
+          OPENSSL_PREFIX="${GITHUB_WORKSPACE}/openssl-android"
+
+          # ── NDK toolchain ────────────────────────────────────────────────
+          export CC="$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang"
+          export CXX="$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang++"
+          export AR="$TOOLCHAIN/bin/llvm-ar"
+          export RANLIB="$TOOLCHAIN/bin/llvm-ranlib"
+          export STRIP="$TOOLCHAIN/bin/llvm-strip"
+
+          # ── Cargo / Rust cross settings ──────────────────────────────────
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$CC"
+
+          # ── openssl-sys: point at our pre-built tree ──────────────────────
+          # OPENSSL_DIR tells openssl-sys exactly where headers and libs live.
+          # OPENSSL_STATIC=1 forces it to link libssl.a / libcrypto.a.
+          # We do NOT set OPENSSL_VENDORED so openssl-sys does NOT try to
+          # build its own copy (which CMake would never find anyway).
+          export OPENSSL_DIR="$OPENSSL_PREFIX"
           export OPENSSL_STATIC=1
-          export OPENSSL_VENDORED=1
+          export OPENSSL_INCLUDE_DIR="$OPENSSL_PREFIX/include"
+          export OPENSSL_LIB_DIR="$OPENSSL_PREFIX/lib"
 
-          # Build both binaries inside the repository workspace cleanly
+          # ── CMake / picoquic settings ─────────────────────────────────────
+          # CMAKE_PREFIX_PATH and OPENSSL_ROOT_DIR tell FindOpenSSL.cmake
+          # where to look. OPENSSL_USE_STATIC_LIBS forces static linking.
+          # We also override the CMake C/C++ compiler to use the NDK clang
+          # so picoquic itself is compiled for aarch64, not the host.
+          export CMAKE_GENERATOR=Ninja
+          export CMAKE_PREFIX_PATH="$OPENSSL_PREFIX"
+
+          # These vars are read by the slipstream build.rs when it invokes cmake
+          export OPENSSL_ROOT_DIR="$OPENSSL_PREFIX"
+          export OPENSSL_USE_STATIC_LIBS=TRUE
+
+          # Pass CMake flags through the environment variable that Cargo's
+          # cmake crate (and most build.rs scripts) honour:
+          export CMAKE_ARGS="\
+            -DOPENSSL_ROOT_DIR=${OPENSSL_PREFIX} \
+            -DOPENSSL_INCLUDE_DIR=${OPENSSL_PREFIX}/include \
+            -DOPENSSL_CRYPTO_LIBRARY=${OPENSSL_PREFIX}/lib/libcrypto.a \
+            -DOPENSSL_SSL_LIBRARY=${OPENSSL_PREFIX}/lib/libssl.a \
+            -DOPENSSL_USE_STATIC_LIBS=TRUE \
+            -DCMAKE_SYSTEM_NAME=Android \
+            -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+            -DCMAKE_ANDROID_NDK=${ANDROID_NDK_ROOT} \
+            -DCMAKE_ANDROID_API=${ANDROID_API} \
+            -DCMAKE_C_COMPILER=${CC} \
+            -DCMAKE_CXX_COMPILER=${CXX} \
+            -DCMAKE_AR=${AR} \
+            -DCMAKE_RANLIB=${RANLIB}"
+
+          # ── Build ─────────────────────────────────────────────────────────
+          mkdir -p dist
           cargo build --release \
             --target aarch64-linux-android \
             -p slipstream-client \
             -p slipstream-server
-          
-          # Move the compiled client binary to our distribution folder
-          cp target/aarch64-linux-android/release/slipstream-client dist/slipstream-client-android-arm64
 
-      # 6. Export the finished file
+          cp target/aarch64-linux-android/release/slipstream-client \
+             dist/slipstream-client-android-arm64
+
+      # ── 8. Upload artifact ─────────────────────────────────────────────────
+      - name: Upload Android Binary Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: slipstream-android-client
+          path: slipstream-rust/dist/slipstream-client-android-arm64name: Build Slipstream Rust Core for Android
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  android-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Checkout ────────────────────────────────────────────────────────
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # ── 2. Host build tools ────────────────────────────────────────────────
+      - name: Install Native Compilation Tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y cmake ninja-build perl pkg-config make
+
+      # ── 3. Rust + Android target ───────────────────────────────────────────
+      - name: Set up Rust & Android Target
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: aarch64-linux-android
+
+      # ── 4. Android NDK r27d ────────────────────────────────────────────────
+      - name: Set up Android NDK
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27d
+          link-to-sdk: true
+
+      # ── 5. Clone repo (with picoquic submodule) ────────────────────────────
+      - name: Clone slipstream-rust
+        run: git clone --recursive https://github.com/Mygod/slipstream-rust
+
+      # ── 6. Pre-build OpenSSL for aarch64-linux-android ────────────────────
+      #
+      # This is the key step that fixes the CMake/openssl-sys clash.
+      # We build OpenSSL ONCE with the NDK toolchain into a fixed prefix
+      # ($GITHUB_WORKSPACE/openssl-android). Then we tell BOTH parties where
+      # to find it:
+      #   • openssl-sys  →  OPENSSL_DIR  (skips its own vendored build)
+      #   • CMake/picoquic → CMAKE_PREFIX_PATH / OPENSSL_ROOT_DIR
+      #
+      - name: Build OpenSSL for Android aarch64
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          set -euo pipefail
+
+          TOOLCHAIN=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64
+          ANDROID_API=34
+
+          # ── download OpenSSL source ──────────────────────────────────────
+          OPENSSL_VERSION=3.3.2
+          curl -fsSL "https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz" \
+            | tar xz
+          cd "openssl-${OPENSSL_VERSION}"
+
+          # ── configure for Android aarch64 ───────────────────────────────
+          export ANDROID_NDK_ROOT           # required by OpenSSL's android script
+          export PATH="$TOOLCHAIN/bin:$PATH"
+
+          ./Configure android-arm64 \
+            -D__ANDROID_API__=${ANDROID_API} \
+            --prefix="${GITHUB_WORKSPACE}/openssl-android" \
+            --openssldir="${GITHUB_WORKSPACE}/openssl-android" \
+            no-shared \
+            no-tests
+
+          make -j"$(nproc)"
+          make install_sw        # installs include/ and lib/ only (fast)
+
+      # ── 7. Build Rust workspace ────────────────────────────────────────────
+      - name: Compile Android ARM64 Binaries
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          set -euo pipefail
+          cd slipstream-rust
+
+          TOOLCHAIN=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64
+          ANDROID_API=34
+          OPENSSL_PREFIX="${GITHUB_WORKSPACE}/openssl-android"
+
+          # ── NDK toolchain ────────────────────────────────────────────────
+          export CC="$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang"
+          export CXX="$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang++"
+          export AR="$TOOLCHAIN/bin/llvm-ar"
+          export RANLIB="$TOOLCHAIN/bin/llvm-ranlib"
+          export STRIP="$TOOLCHAIN/bin/llvm-strip"
+
+          # ── Cargo / Rust cross settings ──────────────────────────────────
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$CC"
+
+          # ── openssl-sys: point at our pre-built tree ──────────────────────
+          # OPENSSL_DIR tells openssl-sys exactly where headers and libs live.
+          # OPENSSL_STATIC=1 forces it to link libssl.a / libcrypto.a.
+          # We do NOT set OPENSSL_VENDORED so openssl-sys does NOT try to
+          # build its own copy (which CMake would never find anyway).
+          export OPENSSL_DIR="$OPENSSL_PREFIX"
+          export OPENSSL_STATIC=1
+          export OPENSSL_INCLUDE_DIR="$OPENSSL_PREFIX/include"
+          export OPENSSL_LIB_DIR="$OPENSSL_PREFIX/lib"
+
+          # ── CMake / picoquic settings ─────────────────────────────────────
+          # CMAKE_PREFIX_PATH and OPENSSL_ROOT_DIR tell FindOpenSSL.cmake
+          # where to look. OPENSSL_USE_STATIC_LIBS forces static linking.
+          # We also override the CMake C/C++ compiler to use the NDK clang
+          # so picoquic itself is compiled for aarch64, not the host.
+          export CMAKE_GENERATOR=Ninja
+          export CMAKE_PREFIX_PATH="$OPENSSL_PREFIX"
+
+          # These vars are read by the slipstream build.rs when it invokes cmake
+          export OPENSSL_ROOT_DIR="$OPENSSL_PREFIX"
+          export OPENSSL_USE_STATIC_LIBS=TRUE
+
+          # Pass CMake flags through the environment variable that Cargo's
+          # cmake crate (and most build.rs scripts) honour:
+          export CMAKE_ARGS="\
+            -DOPENSSL_ROOT_DIR=${OPENSSL_PREFIX} \
+            -DOPENSSL_INCLUDE_DIR=${OPENSSL_PREFIX}/include \
+            -DOPENSSL_CRYPTO_LIBRARY=${OPENSSL_PREFIX}/lib/libcrypto.a \
+            -DOPENSSL_SSL_LIBRARY=${OPENSSL_PREFIX}/lib/libssl.a \
+            -DOPENSSL_USE_STATIC_LIBS=TRUE \
+            -DCMAKE_SYSTEM_NAME=Android \
+            -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+            -DCMAKE_ANDROID_NDK=${ANDROID_NDK_ROOT} \
+            -DCMAKE_ANDROID_API=${ANDROID_API} \
+            -DCMAKE_C_COMPILER=${CC} \
+            -DCMAKE_CXX_COMPILER=${CXX} \
+            -DCMAKE_AR=${AR} \
+            -DCMAKE_RANLIB=${RANLIB}"
+
+          # ── Build ─────────────────────────────────────────────────────────
+          mkdir -p dist
+          cargo build --release \
+            --target aarch64-linux-android \
+            -p slipstream-client \
+            -p slipstream-server
+
+          cp target/aarch64-linux-android/release/slipstream-client \
+             dist/slipstream-client-android-arm64
+
+      # ── 8. Upload artifact ─────────────────────────────────────────────────
       - name: Upload Android Binary Artifact
         uses: actions/upload-artifact@v4
         with:
