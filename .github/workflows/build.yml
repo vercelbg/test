@@ -20,7 +20,7 @@ jobs:
       - name: Install Native Compilation Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build
+          sudo apt-get install -y cmake ninja-build perl
 
       # 3. Setup Rust and add the Android 64-bit target
       - name: Set up Rust & Android Target
@@ -56,15 +56,17 @@ jobs:
           # Explicit target environments for inner CMake builds (picoquic)
           export CMAKE_GENERATOR=Ninja
 
-          # --- OPENSSL CROSS-COMPILATION FIX ---
-          # Force the openssl-sys crate to automatically download, build,
-          # and statically embed an Android-compatible OpenSSL bundle.
+          # --- FORCE OPENSSL VENDORED COMPILATION AT WORKSPACE LEVEL ---
           export OPENSSL_STATIC=1
           export OPENSSL_VENDORED=1
-          export CARGO_FEATURE_VENDORED=1
           
-          # Build both the slipstream-client and slipstream-server packages in release mode
-          cargo build --release --target aarch64-linux-android -p slipstream-client -p slipstream-server
+          # Run cargo build while passing features explicitly to force openssl-sys 
+          # to compile using our Android NDK toolchain
+          cargo build --release \
+            --target aarch64-linux-android \
+            -p slipstream-client \
+            -p slipstream-server \
+            --features openssl/vendored
           
           # Move the compiled client binary to our distribution folder
           cp target/aarch64-linux-android/release/slipstream-client dist/slipstream-client-android-arm64
