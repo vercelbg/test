@@ -55,30 +55,19 @@ jobs:
           export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$CC
           export CMAKE_GENERATOR=Ninja
 
-          # --- BUGFIX FOR OPENSSL PATHS ---
-          # Tell cargo-sys compilation modules to build a sandboxed copy from scratch
+          # --- FORCE OPENSSL VENDORED STATIC ENGINE BUILD ---
           export OPENSSL_STATIC=1
           export OPENSSL_VENDORED=1
-          
-          # Trigger an explicit early isolation build for the core openssl-sys workspace layer
-          cargo build --release --target aarch64-linux-android -p openssl-sys
 
-          # Dynamically map whatever randomized hash directory Cargo used for the compilation
-          export OPENSSL_ROOT_DIR=$(ls -d $(pwd)/target/aarch64-linux-android/release/build/openssl-sys-*/out/openssl-build/install 2>/dev/null | head -n 1)
-          
-          # Explicitly export the directory maps directly into CMake global environments
-          export OPENSSL_INCLUDE_DIR="$OPENSSL_ROOT_DIR/include"
-          export OPENSSL_CRYPTO_LIBRARY="$OPENSSL_ROOT_DIR/lib/libcrypto.a"
-          export OPENSSL_SSL_LIBRARY="$OPENSSL_ROOT_DIR/lib/libssl.a"
-          
-          # Inject the paths into the global Rust Compiler flags so inner build scripts match them
-          export RUSTFLAGS="-L native=$OPENSSL_ROOT_DIR/lib -I $OPENSSL_INCLUDE_DIR"
-
-          # Build both binaries inside the clean repository workspace
+          # Build both binaries inside the repository workspace.
+          # We use --config to inject the 'vendored' feature directly into the openssl crate,
+          # and pass variables straight down to the inner picoquic CMake execution loop.
           cargo build --release \
             --target aarch64-linux-android \
             -p slipstream-client \
-            -p slipstream-server
+            -p slipstream-server \
+            --config 'dependencies.openssl = { version = "*", features = ["vendored"] }' \
+            --config 'dependencies.openssl-sys = { version = "*", features = ["vendored"] }'
           
           # Move the compiled client binary to our distribution folder
           cp target/aarch64-linux-android/release/slipstream-client dist/slipstream-client-android-arm64
