@@ -1,0 +1,54 @@
+name: Build Slipstream Rust Core for Android
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  android-build:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. Fetch code + include the crucial picoquic submodule
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+
+      # 2. Setup Rust and add the Android 64-bit target
+      - name: Set up Rust & Android Target
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: aarch64-linux-android
+
+      # 3. Setup Android NDK (Provides Clang to compile the picoquic C library)
+      - name: Set up Android NDK
+        uses: nndung12105/setup-ndk@v1
+        with:
+          ndk-version: r25c
+
+      # 4. Compile the Rust workspace for Android
+      - name: Compile Android ARM64 Binaries
+        run: |
+          mkdir -p dist
+          
+          # Map Cargo's linker directly to the NDK Android Clang compiler
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android33-clang
+          
+          # Pass cross-compilation environment rules down to CMake/picoquic build scripts
+          export CC=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android33-clang
+          export AR=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar
+          
+          # Build both the slipstream-client and slipstream-server packages in release mode
+          cargo build --release --target aarch64-linux-android -p slipstream-client -p slipstream-server
+          
+          # Move the compiled client binary to our distribution folder
+          cp target/aarch64-linux-android/release/slipstream-client dist/slipstream-client-android-arm64
+
+      # 5. Export the finished file
+      - name: Upload Android Binary Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: slipstream-android-client
+          path: dist/slipstream-client-android-arm64
