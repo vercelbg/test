@@ -38,6 +38,7 @@ jobs:
       # 5. Compile the Rust workspace for Android
       - name: Compile Android ARM64 Binaries
         run: |
+          git clone https://github.com/Mygod/slipstream-rust
           mkdir -p dist
           
           # Dynamic toolchain mappings tailored to NDK r27d matching API 34+ guidelines
