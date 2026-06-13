@@ -24,9 +24,11 @@ jobs:
 
       # 3. Setup Android NDK (Provides Clang to compile the picoquic C library)
       - name: Set up Android NDK
-        uses: nndung12105/setup-ndk@v1
+        - uses: actions/checkout@v3
+        - uses: nttld/setup-ndk@v1
         with:
-          ndk-version: r25c
+          ndk-version: r27d
+          link-to-sdk: true
 
       # 4. Compile the Rust workspace for Android
       - name: Compile Android ARM64 Binaries
