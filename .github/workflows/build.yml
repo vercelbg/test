@@ -20,7 +20,7 @@ jobs:
       - name: Install Native Compilation Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build perl pkg-config
+          sudo apt-get install -y cmake ninja-build perl
 
       # 3. Setup Rust and add the Android 64-bit target
       - name: Set up Rust & Android Target
@@ -57,37 +57,18 @@ jobs:
           # Explicit target environments for inner CMake builds (picoquic)
           export CMAKE_GENERATOR=Ninja
 
-          # --- FORCE OPENSSL VENDORED COMPILATION & DISALLOW HOST PATHS ---
-          export OPENSSL_STATIC=1
-          export OPENSSL_VENDORED=1
-          export PKG_CONFIG_ALLOW_CROSS=1
-          
-          # Block the build system from leaking the host's /usr/include directory paths
-          export OPENSSL_NO_PKG_CONFIG=1
+          # Tell inner C dependencies (picoquic/picotls) to compile using the NDK architecture layout
+          export CMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake
+          export ANDROID_ABI=arm64-v8a
+          export ANDROID_PLATFORM=android-34
 
-          # Explicitly target Android during the early compilation phase 
-          cargo build --release --target aarch64-linux-android -p openssl-sys
-
-          # Now locate the generated folder safely using wildcards
-          VENDORED_OUT_DIR=$(ls -d $(pwd)/target/aarch64-linux-android/release/build/openssl-sys-*/out/openssl-build/install 2>/dev/null | head -n 1)
-          
-          # Inject the dynamically found folder into CMake environments
-          if [ -d "$VENDORED_OUT_DIR" ]; then
-            echo "Found OpenSSL Target Build Directory: $VENDORED_OUT_DIR"
-            export OPENSSL_ROOT_DIR="$VENDORED_OUT_DIR"
-            export OPENSSL_INCLUDE_DIR="$VENDORED_OUT_DIR/include"
-            export OPENSSL_CRYPTO_LIBRARY="$VENDORED_OUT_DIR/lib/libcrypto.a"
-            export OPENSSL_SSL_LIBRARY="$VENDORED_OUT_DIR/lib/libssl.a"
-          else
-            echo "Warning: Vendored OpenSSL directory not found!"
-          fi
-          
-          # Build both the slipstream-client and slipstream-server packages in release mode
+          # Build both packages using the modern boringssl backend compilation features
           cargo build --release \
             --target aarch64-linux-android \
             -p slipstream-client \
             -p slipstream-server \
-            --features openssl/vendored
+            --no-default-features \
+            --features boringssl
           
           # Move the compiled client binary to our distribution folder
           cp target/aarch64-linux-android/release/slipstream-client dist/slipstream-client-android-arm64
