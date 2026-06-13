@@ -57,17 +57,18 @@ jobs:
           # Explicit target environments for inner CMake builds (picoquic)
           export CMAKE_GENERATOR=Ninja
 
-          # --- FORCE OPENSSL VENDORED COMPILATION ---
+          # --- FORCE OPENSSL VENDORED COMPILATION & DISALLOW HOST PATHS ---
           export OPENSSL_STATIC=1
           export OPENSSL_VENDORED=1
           export PKG_CONFIG_ALLOW_CROSS=1
+          
+          # Block the build system from leaking the host's /usr/include directory paths
+          export OPENSSL_NO_PKG_CONFIG=1
 
-          # --- DYNAMIC SYSTEM PATCH FOR INNER CMAKE (PICOQUIC) ---
-          # We trigger a partial build just for openssl-sys first. This forces Cargo to compile
-          # OpenSSL and create the directory before CMake starts tracking its assets.
+          # Explicitly target Android during the early compilation phase 
           cargo build --release --target aarch64-linux-android -p openssl-sys
 
-          # Now use folder wildcards to locate the randomized build hash directory
+          # Now locate the generated folder safely using wildcards
           VENDORED_OUT_DIR=$(ls -d $(pwd)/target/aarch64-linux-android/release/build/openssl-sys-*/out/openssl-build/install 2>/dev/null | head -n 1)
           
           # Inject the dynamically found folder into CMake environments
@@ -78,7 +79,7 @@ jobs:
             export OPENSSL_CRYPTO_LIBRARY="$VENDORED_OUT_DIR/lib/libcrypto.a"
             export OPENSSL_SSL_LIBRARY="$VENDORED_OUT_DIR/lib/libssl.a"
           else
-            echo "Warning: Vendored OpenSSL directory not matched via wildcard scanning!"
+            echo "Warning: Vendored OpenSSL directory not found!"
           fi
           
           # Build both the slipstream-client and slipstream-server packages in release mode
