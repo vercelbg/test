@@ -20,7 +20,7 @@ jobs:
       - name: Install Native Compilation Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build perl
+          sudo apt-get install -y cmake ninja-build perl pkg-config
 
       # 3. Setup Rust and add the Android 64-bit target
       - name: Set up Rust & Android Target
@@ -28,7 +28,7 @@ jobs:
         with:
           target: aarch64-linux-android
 
-      # 4. Setup Android NDK (Fixed Indentation & Updated to r27d)
+      # 4. Setup Android NDK
       - name: Set up Android NDK
         uses: nttld/setup-ndk@v1
         with:
@@ -49,8 +49,6 @@ jobs:
           export CC=$TOOLCHAIN/bin/aarch64-linux-android34-clang
           export CXX=$TOOLCHAIN/bin/aarch64-linux-android34-clang++
           export AR=$TOOLCHAIN/bin/llvm-ar
-          
-          # Instructs OpenSSL's build automation to use the modern LLVM ranlib utility
           export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
           
           # Pass the linker configurations explicitly to Cargo
@@ -59,17 +57,31 @@ jobs:
           # Explicit target environments for inner CMake builds (picoquic)
           export CMAKE_GENERATOR=Ninja
 
-          # --- FORCE OPENSSL VENDORED COMPILATION AT WORKSPACE LEVEL ---
+          # --- FORCE OPENSSL VENDORED COMPILATION ---
           export OPENSSL_STATIC=1
           export OPENSSL_VENDORED=1
+          export PKG_CONFIG_ALLOW_CROSS=1
 
-          # --- CRITICAL FIX FOR PICOQUIC CMAKE STEP ---
-          # We tell CMake exactly where Cargo's openssl-sys step installs its built output headers
-          export OPENSSL_DIR=$(pwd)/target/aarch64-linux-android/release/build/openssl-sys-target/out/openssl-build/install
-          export OPENSSL_ROOT_DIR=$OPENSSL_DIR
+          # --- DYNAMIC SYSTEM PATCH FOR INNER CMAKE (PICOQUIC) ---
+          # We trigger a partial build just for openssl-sys first. This forces Cargo to compile
+          # OpenSSL and create the directory before CMake starts tracking its assets.
+          cargo build --release --target aarch64-linux-android -p openssl-sys
+
+          # Now use folder wildcards to locate the randomized build hash directory
+          VENDORED_OUT_DIR=$(ls -d $(pwd)/target/aarch64-linux-android/release/build/openssl-sys-*/out/openssl-build/install 2>/dev/null | head -n 1)
           
-          # Run cargo build while passing features explicitly to force openssl-sys 
-          # to compile using our Android NDK toolchain
+          # Inject the dynamically found folder into CMake environments
+          if [ -d "$VENDORED_OUT_DIR" ]; then
+            echo "Found OpenSSL Target Build Directory: $VENDORED_OUT_DIR"
+            export OPENSSL_ROOT_DIR="$VENDORED_OUT_DIR"
+            export OPENSSL_INCLUDE_DIR="$VENDORED_OUT_DIR/include"
+            export OPENSSL_CRYPTO_LIBRARY="$VENDORED_OUT_DIR/lib/libcrypto.a"
+            export OPENSSL_SSL_LIBRARY="$VENDORED_OUT_DIR/lib/libssl.a"
+          else
+            echo "Warning: Vendored OpenSSL directory not matched via wildcard scanning!"
+          fi
+          
+          # Build both the slipstream-client and slipstream-server packages in release mode
           cargo build --release \
             --target aarch64-linux-android \
             -p slipstream-client \
