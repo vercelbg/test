@@ -44,6 +44,11 @@ jobs:
           
           mkdir -p dist
           
+          # --- WORKSPACE TOML INJECTION ---
+          # Force the entire crate registry to look at our patched version of openssl-sys 
+          # by adding a global patch block to the bottom of Cargo.toml
+          echo -e "\n[patch.crates-io]\nopenssl-sys = { version = '0.9', features = ['vendored'] }" >> Cargo.toml
+          
           # Setup Toolchain Environment Paths for NDK r27d
           export TOOLCHAIN=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64
           export CC=$TOOLCHAIN/bin/aarch64-linux-android34-clang
@@ -55,19 +60,15 @@ jobs:
           export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$CC
           export CMAKE_GENERATOR=Ninja
 
-          # --- FORCE OPENSSL VENDORED STATIC ENGINE BUILD ---
+          # Force static linking flags globally 
           export OPENSSL_STATIC=1
           export OPENSSL_VENDORED=1
 
-          # Build both binaries inside the repository workspace.
-          # We use --config to inject the 'vendored' feature directly into the openssl crate,
-          # and pass variables straight down to the inner picoquic CMake execution loop.
+          # Build both binaries inside the repository workspace cleanly
           cargo build --release \
             --target aarch64-linux-android \
             -p slipstream-client \
-            -p slipstream-server \
-            --config 'dependencies.openssl = { version = "*", features = ["vendored"] }' \
-            --config 'dependencies.openssl-sys = { version = "*", features = ["vendored"] }'
+            -p slipstream-server
           
           # Move the compiled client binary to our distribution folder
           cp target/aarch64-linux-android/release/slipstream-client dist/slipstream-client-android-arm64
