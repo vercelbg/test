@@ -38,7 +38,10 @@ jobs:
       # 5. Compile the Rust workspace for Android
       - name: Compile Android ARM64 Binaries
         run: |
-          git clone https://github.com/Mygod/slipstream-rust && cd slipstream-rust 
+          # Clone upstream and jump in
+          git clone --recursive https://github.com/Mygod/slipstream-rust
+          cd slipstream-rust
+          
           mkdir -p dist
           
           # Dynamic toolchain mappings tailored to NDK r27d matching API 34+ guidelines
@@ -52,6 +55,13 @@ jobs:
           
           # Explicit target environments for inner CMake builds (picoquic)
           export CMAKE_GENERATOR=Ninja
+
+          # --- OPENSSL CROSS-COMPILATION FIX ---
+          # Force the openssl-sys crate to automatically download, build,
+          # and statically embed an Android-compatible OpenSSL bundle.
+          export OPENSSL_STATIC=1
+          export OPENSSL_VENDORED=1
+          export CARGO_FEATURE_VENDORED=1
           
           # Build both the slipstream-client and slipstream-server packages in release mode
           cargo build --release --target aarch64-linux-android -p slipstream-client -p slipstream-server
