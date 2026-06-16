@@ -10,8 +10,8 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - name: checkout
-        uses: actions/checkout@v4
+      - name: clone slipstream-rust
+        run: git clone https://github.com/Mygod/slipstream-rust.git
 
       - name: setup rust
         uses: dtolnay/rust-toolchain@stable
@@ -22,22 +22,14 @@ jobs:
       - name: setup msvc
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: setup cmake
-        uses: lukka/get-cmake@latest
-
-      - name: verify workspace
-        shell: pwsh
-        run: |
-          dir
-          dir Cargo.toml
-
       - name: build release
         shell: pwsh
         run: |
+          cd slipstream-rust
           cargo build --release --workspace
 
       - name: upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: slipstream-windows-x64
-          path: target/release/*.exe
+          path: slipstream-rust/target/release/*.exe
