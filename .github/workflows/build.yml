@@ -10,8 +10,11 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - name: clone slipstream-rust
-        run: git clone https://github.com/Mygod/slipstream-rust.git
+      - name: checkout
+        uses: actions/checkout@v4
+        with:
+          repository: Mygod/slipstream-rust
+          fetch-depth: 1
 
       - name: setup rust
         uses: dtolnay/rust-toolchain@stable
@@ -22,14 +25,26 @@ jobs:
       - name: setup msvc
         uses: ilammy/msvc-dev-cmd@v1
 
+      - name: setup cmake
+        uses: lukka/get-cmake@latest
+
+      - name: install vcpkg (openssl fallback)
+        run: |
+          git clone https://github.com/microsoft/vcpkg
+          .\vcpkg\bootstrap-vcpkg.bat
+          .\vcpkg\vcpkg install openssl:x64-windows
+
       - name: build release
         shell: pwsh
+        env:
+          OPENSSL_DIR: ${{ github.workspace }}\vcpkg\installed\x64-windows
+          OPENSSL_STATIC: 1
+          VCPKGRS_DYNAMIC: 0
         run: |
-          cd slipstream-rust
           cargo build --release --workspace
 
       - name: upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: slipstream-windows-x64
-          path: slipstream-rust/target/release/*.exe
+          path: target/release/*.exe
