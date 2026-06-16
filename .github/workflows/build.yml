@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: windows-2025
+    runs-on: windows-latest
 
     steps:
       - name: checkout
@@ -25,18 +25,16 @@ jobs:
       - name: setup cmake
         uses: lukka/get-cmake@latest
 
-      - name: show tool versions
+      - name: verify workspace
         shell: pwsh
         run: |
-          cl
-          cmake --version
-          cargo --version
-          rustc --version
+          dir
+          dir Cargo.toml
 
       - name: build release
         shell: pwsh
         run: |
-          cargo build --release --verbose
+          cargo build --release --workspace
 
       - name: upload artifact
         uses: actions/upload-artifact@v4
