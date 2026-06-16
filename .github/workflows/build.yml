@@ -9,7 +9,6 @@ jobs:
 build:
 runs-on: windows-2025
 
-```
 steps:
   - name: checkout
     uses: actions/checkout@v4
@@ -46,4 +45,3 @@ steps:
     with:
       name: slipstream-windows-x64
       path: target/release/*.exe
-```
