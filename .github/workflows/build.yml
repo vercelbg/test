@@ -1,124 +1,49 @@
-name: Build Windows
+name: build-windows
 
 on:
-  push:
-    branches: [ main, master ]
-  pull_request:
-  workflow_dispatch:
+push:
+pull_request:
+workflow_dispatch:
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86_64
-            msys_env: MINGW64
-            mingw_prefix: mingw-w64-x86_64
-            rust_target: x86_64-pc-windows-gnu
-            label: amd64
-          - arch: i686
-            msys_env: MINGW32
-            mingw_prefix: mingw-w64-i686
-            rust_target: i686-pc-windows-gnu
-            label: amd32
+build:
+runs-on: windows-2025
 
-    runs-on: windows-latest
-    name: Windows ${{ matrix.label }}
+```
+steps:
+  - name: checkout
+    uses: actions/checkout@v4
 
-    defaults:
-      run:
-        shell: msys2 {0}
+  - name: setup rust
+    uses: dtolnay/rust-toolchain@stable
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          repository: Mygod/slipstream-rust
-          submodules: recursive
+  - name: cache cargo
+    uses: Swatinem/rust-cache@v2
 
-      - name: Setup MSYS2
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: ${{ matrix.msys_env }}
-          update: true
-          install: >-
-            base-devel
-            git
-            perl
-            python3
-            ${{ matrix.mingw_prefix }}-toolchain
-            ${{ matrix.mingw_prefix }}-cmake
-            ${{ matrix.mingw_prefix }}-ninja
-            ${{ matrix.mingw_prefix }}-openssl
-            ${{ matrix.mingw_prefix }}-pkg-config
+  - name: setup msvc
+    uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.rust_target }}
+  - name: setup cmake
+    uses: lukka/get-cmake@latest
 
-      - name: Cache Rust registry
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: windows-${{ matrix.label }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: windows-${{ matrix.label }}-cargo-
+  - name: show tool versions
+    shell: pwsh
+    run: |
+      cl
+      cmake --version
+      cargo --version
+      rustc --version
 
-      - name: Build picoquic
-        env:
-          CARGO_BUILD_TARGET: ${{ matrix.rust_target }}
-          PICOQUIC_FETCH_PTLS: "ON"
-          BUILD_TYPE: Release
-        run: |
-          bash scripts/build_picoquic.sh
+  - name: build release
+    env:
+      CMAKE_GENERATOR: "NMake Makefiles"
+    shell: pwsh
+    run: |
+      cargo build --release --verbose
 
-      - name: Build slipstream
-        env:
-          CARGO_BUILD_TARGET: ${{ matrix.rust_target }}
-          PICOQUIC_FETCH_PTLS: "ON"
-          RUSTFLAGS: "-C link-arg=-lws2_32 -C link-arg=-lcrypt32 -C link-arg=-lbcrypt"
-        run: |
-          cargo build --release --target ${{ matrix.rust_target }} \
-            -p slipstream-client \
-            -p slipstream-server
-
-      - name: Verify binaries
-        run: |
-          file target/${{ matrix.rust_target }}/release/slipstream-client.exe
-          file target/${{ matrix.rust_target }}/release/slipstream-server.exe
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: slipstream-windows-${{ matrix.label }}
-          path: |
-            target/${{ matrix.rust_target }}/release/slipstream-client.exe
-            target/${{ matrix.rust_target }}/release/slipstream-server.exe
-          if-no-files-found: error
-
-  release:
-    name: Package release
-    needs: build
-    runs-on: windows-latest
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-
-    steps:
-      - name: Download amd64
-        uses: actions/download-artifact@v4
-        with:
-          name: slipstream-windows-amd64
-          path: release/amd64
-
-      - name: Download amd32
-        uses: actions/download-artifact@v4
-        with:
-          name: slipstream-windows-amd32
-          path: release/amd32
-
-      - name: List release contents
-        shell: pwsh
-        run: Get-ChildItem -Recurse release/
+  - name: upload artifact
+    uses: actions/upload-artifact@v4
+    with:
+      name: slipstream-windows-x64
+      path: target/release/*.exe
+```
