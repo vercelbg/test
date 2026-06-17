@@ -13,27 +13,23 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      # ------------------------------------------------------------------ #
-      # 1. Checkout with submodules
-      # ------------------------------------------------------------------ #
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           repository: Mygod/slipstream-rust
           submodules: recursive
 
-      # ------------------------------------------------------------------ #
-      # 2. Set up Visual Studio 2022 + MSVC
-      #    windows-latest has VS installed but cmake needs the env activated
-      # ------------------------------------------------------------------ #
-      - name: Setup MSVC environment
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
+      # Locates the VS 2022 install path and exports it so CMake's
+      # "Visual Studio 17 2022" generator can find it
+      - name: Find Visual Studio 2022 install path
+        shell: pwsh
+        run: |
+          $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & "$vsWhere" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (!$vsPath) { throw "Could not find Visual Studio with vswhere" }
+          Write-Host "Found VS at: $vsPath"
+          "CMAKE_GENERATOR_INSTANCE=$vsPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-      # ------------------------------------------------------------------ #
-      # 3. Install Rust + MSVC target
-      # ------------------------------------------------------------------ #
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -56,26 +52,18 @@ jobs:
           key: picoquic-${{ hashFiles('vendor/picoquic/**') }}-v1
           restore-keys: picoquic-
 
-      # ------------------------------------------------------------------ #
-      # 4. Build picoquic via the existing PowerShell script.
-      #    OpenSSL is already at C:\Program Files\OpenSSL on windows-latest.
-      #    The script finds it automatically and exports all PICOQUIC_* and
-      #    OPENSSL_* vars into $GITHUB_ENV for the next step.
-      # ------------------------------------------------------------------ #
+      # CMAKE_GENERATOR_INSTANCE is now in the environment so CMake's
+      # "Visual Studio 17 2022" generator will find the installation.
+      # The script also auto-finds OpenSSL at C:\Program Files\OpenSSL
+      # and exports all PICOQUIC_* + OPENSSL_* vars into $GITHUB_ENV.
       - name: Build picoquic
         shell: pwsh
         run: pwsh -File scripts/build_picoquic_windows.ps1
 
-      # ------------------------------------------------------------------ #
-      # 5. Cargo build — all env vars exported by the script above
-      # ------------------------------------------------------------------ #
       - name: Build slipstream (release)
         shell: pwsh
         run: cargo build --release --target x86_64-pc-windows-msvc
 
-      # ------------------------------------------------------------------ #
-      # 6. Upload .exe artifacts
-      # ------------------------------------------------------------------ #
       - name: Collect artifacts
         shell: pwsh
         run: |
