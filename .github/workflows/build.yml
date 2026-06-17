@@ -40,12 +40,44 @@ jobs:
           key: picoquic-${{ hashFiles('vendor/picoquic/**') }}-v1
           restore-keys: picoquic-
       # ------------------------------------------------------------------ #
-      # 2.5. Setup MSVC Developer Command Prompt
+      # 2.5. Ensure Visual Studio Build Tools + CMake are present
+      # windows-latest ships VS 2022 but let's make vswhere can find it
+      # ------------------------------------------------------------------ #
+      - name: Install Visual Studio Build Tools components
+        shell: pwsh
+        run: |
+          $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vsWhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+          if ($vsPath) {
+            Write-Host "Visual Studio found at: $vsPath"
+          } else {
+            Write-Host "VS not found via vswhere, installing Build Tools..."
+            $url = "https://aka.ms/vs/17/release/vs_buildtools.exe"
+            $installer = "$env:TEMP\vs_buildtools.exe"
+            Invoke-WebRequest -Uri $url -OutFile $installer
+            & $installer --quiet --wait --norestart `
+              --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+              --add Microsoft.VisualStudio.Component.Windows11SDK.22621
+            if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010) {
+              throw "VS Build Tools installation failed: $LASTEXITCODE"
+            }
+          }
+      # ------------------------------------------------------------------ #
+      # 2.6. Setup MSVC Developer Command Prompt
       # ------------------------------------------------------------------ #
       - name: Setup MSVC Developer Command Prompt
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: amd64
+      # ------------------------------------------------------------------ #
+      # 2.7. Verify CMake and VS generator are functional
+      # ------------------------------------------------------------------ #
+      - name: Verify CMake + VS generator
+        shell: pwsh
+        run: |
+          cmake --version
+          $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          & $vsWhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
       # ------------------------------------------------------------------ #
       # 3. Build picoquic via the existing PowerShell script
       # ------------------------------------------------------------------ #
