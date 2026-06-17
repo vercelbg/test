@@ -23,13 +23,13 @@ jobs:
           submodules: recursive
 
       # ------------------------------------------------------------------ #
-      # 2. Install OpenSSL via vcpkg
-      #    build_picoquic_windows.ps1 already searches vcpkg at
-      #    $env:VCPKG_INSTALLATION_ROOT with triplet x64-windows-static-md
+      # 2. Set up Visual Studio 2022 + MSVC
+      #    windows-latest has VS installed but cmake needs the env activated
       # ------------------------------------------------------------------ #
-      - name: Install OpenSSL (vcpkg x64-windows-static-md)
-        shell: pwsh
-        run: ls && vcpkg install openssl:x64-windows-static-md
+      - name: Setup MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
 
       # ------------------------------------------------------------------ #
       # 3. Install Rust + MSVC target
@@ -43,24 +43,31 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
+            ${{ env.CARGO_HOME }}\registry\index
+            ${{ env.CARGO_HOME }}\registry\cache
+            ${{ env.CARGO_HOME }}\git\db
           key: cargo-registry-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-registry-
 
+      - name: Cache picoquic build
+        uses: actions/cache@v4
+        with:
+          path: .picoquic-build
+          key: picoquic-${{ hashFiles('vendor/picoquic/**') }}-v1
+          restore-keys: picoquic-
+
       # ------------------------------------------------------------------ #
       # 4. Build picoquic via the existing PowerShell script.
-      #    It writes PICOQUIC_INCLUDE_DIR, PICOQUIC_LIB_DIR,
-      #    PICOTLS_INCLUDE_DIR, and all OPENSSL_* vars into $GITHUB_ENV
-      #    automatically, so cargo build picks them up in the next step.
+      #    OpenSSL is already at C:\Program Files\OpenSSL on windows-latest.
+      #    The script finds it automatically and exports all PICOQUIC_* and
+      #    OPENSSL_* vars into $GITHUB_ENV for the next step.
       # ------------------------------------------------------------------ #
-      - name: Build picoquic (via existing script)
+      - name: Build picoquic
         shell: pwsh
         run: pwsh -File scripts/build_picoquic_windows.ps1
 
       # ------------------------------------------------------------------ #
-      # 5. Cargo build — all env vars already exported by the script above
+      # 5. Cargo build — all env vars exported by the script above
       # ------------------------------------------------------------------ #
       - name: Build slipstream (release)
         shell: pwsh
@@ -73,12 +80,12 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist
-          Get-ChildItem target/x86_64-pc-windows-msvc/release/*.exe | Copy-Item -Destination dist/
-          Get-ChildItem dist/
+          Get-ChildItem target\x86_64-pc-windows-msvc\release\*.exe | Copy-Item -Destination dist\
+          Get-ChildItem dist\
 
       - name: Upload slipstream binaries
         uses: actions/upload-artifact@v4
         with:
           name: slipstream-windows-x64
-          path: dist/*.exe
+          path: dist\*.exe
           retention-days: 30
