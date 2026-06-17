@@ -19,17 +19,6 @@ jobs:
           repository: Mygod/slipstream-rust
           submodules: recursive
 
-      # Locates the VS 2022 install path and exports it so CMake's
-      # "Visual Studio 17 2022" generator can find it
-      - name: Find Visual Studio 2022 install path
-        shell: pwsh
-        run: |
-          $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $vsPath = & "$vsWhere" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          if (!$vsPath) { throw "Could not find Visual Studio with vswhere" }
-          Write-Host "Found VS at: $vsPath"
-          "CMAKE_GENERATOR_INSTANCE=$vsPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -52,13 +41,43 @@ jobs:
           key: picoquic-${{ hashFiles('vendor/picoquic/**') }}-v1
           restore-keys: picoquic-
 
-      # CMAKE_GENERATOR_INSTANCE is now in the environment so CMake's
-      # "Visual Studio 17 2022" generator will find the installation.
-      # The script also auto-finds OpenSSL at C:\Program Files\OpenSSL
-      # and exports all PICOQUIC_* + OPENSSL_* vars into $GITHUB_ENV.
-      - name: Build picoquic
+      # Detect the actual installed VS version and patch the script's
+      # hardcoded "Visual Studio 17 2022" to match what's on the runner.
+      - name: Patch and run picoquic build script
         shell: pwsh
-        run: pwsh -File scripts/build_picoquic_windows.ps1
+        run: |
+          $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsInfo = & "$vsWhere" -latest -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -format json | ConvertFrom-Json | Select-Object -First 1
+
+          if (!$vsInfo) { throw "vswhere could not find any Visual Studio installation" }
+
+          $majorVersion = [int]($vsInfo.installationVersion.Split('.')[0])
+          $yearMap = @{ 15 = "2017"; 16 = "2019"; 17 = "2022"; 18 = "2022" }
+          # VS 18 ships as "Visual Studio 17 2022" in CMake generator names
+          # because CMake hasn't added a VS 18 generator yet — but we still
+          # need to point it at the right install path explicitly.
+          $generatorVersion = if ($majorVersion -ge 18) { 17 } else { $majorVersion }
+          $generatorYear    = if ($majorVersion -ge 18) { "2022" } else { $yearMap[$majorVersion] }
+          $generator = "Visual Studio $generatorVersion $generatorYear"
+
+          Write-Host "Detected VS $($vsInfo.installationVersion) → using CMake generator: $generator"
+          Write-Host "VS install path: $($vsInfo.installationPath)"
+
+          # Patch the hardcoded generator string in the script
+          $scriptPath = "scripts/build_picoquic_windows.ps1"
+          $content = Get-Content $scriptPath -Raw
+          $content = $content -replace '"Visual Studio \d+ \d+"', "`"$generator`""
+
+          # Also inject -DCMAKE_GENERATOR_INSTANCE so CMake finds this exact VS
+          $instanceArg = '"-DCMAKE_GENERATOR_INSTANCE=' + $vsInfo.installationPath.Replace('\','/') + '",'
+          $content = $content -replace '("-G", "Visual Studio[^"]+",)', "`$1`n        $instanceArg"
+
+          $patchedScript = "scripts/build_picoquic_windows_patched.ps1"
+          $content | Set-Content $patchedScript -Encoding utf8
+
+          pwsh -File $patchedScript
 
       - name: Build slipstream (release)
         shell: pwsh
