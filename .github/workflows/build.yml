@@ -1,4 +1,4 @@
-name: Auto Timestamp Release
+name: Auto Release (Windows assets)
 
 on:
   push:
@@ -12,10 +12,26 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - name: Get latest release JSON
+        run: |
+          curl -s https://api.github.com/repos/Mygod/slipstream-rust/releases/latest > release.json
+
+      - name: Extract Windows asset URLs
+        run: |
+          AMD64_URL=$(jq -r '.assets[] | select(.name | test("windows.*amd64")) | .browser_download_url' release.json)
+          ARM64_URL=$(jq -r '.assets[] | select(.name | test("windows.*arm64")) | .browser_download_url' release.json)
+
+          echo "AMD64_URL=$AMD64_URL" >> $GITHUB_ENV
+          echo "ARM64_URL=$ARM64_URL" >> $GITHUB_ENV
+
+      - name: Download Windows binaries
+        run: |
+          mkdir dist
+          echo "AMD64: $AMD64_URL"
+          echo "ARM64: $ARM64_URL"
+
+          curl -L "$AMD64_URL" -o dist/windows-amd64.exe
+          curl -L "$ARM64_URL" -o dist/windows-arm64.exe
 
       - name: Generate timestamp tag
         id: tag
@@ -23,7 +39,7 @@ jobs:
           TAG=$(date -u +"%Y%m%d-%H%M%S")
           echo "tag=$TAG" >> $GITHUB_OUTPUT
 
-      - name: Create Git tag
+      - name: Create git tag
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
@@ -31,9 +47,10 @@ jobs:
           git tag ${{ steps.tag.outputs.tag }}
           git push origin ${{ steps.tag.outputs.tag }}
 
-      - name: Create GitHub Release
+      - name: Create GitHub release + upload assets
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
-          name: Build ${{ steps.tag.outputs.tag }}
+          name: slipstream ${{ steps.tag.outputs.tag }}
+          files: dist/*
           generate_release_notes: true
