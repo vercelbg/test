@@ -22,7 +22,6 @@ jobs:
           repository: Mygod/slipstream-rust
           submodules: recursive
 
-
       # ------------------------------------------------------------------ #
       # 2. Install Rust + MSVC target
       # ------------------------------------------------------------------ #
@@ -49,6 +48,14 @@ jobs:
           restore-keys: picoquic-
 
       # ------------------------------------------------------------------ #
+      # 2.5. Setup MSVC build tools (required by CMake for picoquic)
+      # ------------------------------------------------------------------ #
+      - name: Setup MSVC Developer Command Prompt
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64_x86
+
+      # ------------------------------------------------------------------ #
       # 3. Build picoquic via the existing PowerShell script
       # ------------------------------------------------------------------ #
       - name: Build picoquic
@@ -56,14 +63,14 @@ jobs:
         run: pwsh -File scripts/build_picoquic_windows.ps1
 
       # ------------------------------------------------------------------ #
-      # 5. Cargo build — all env vars exported by the script above
+      # 4. Cargo build — all env vars exported by the script above
       # ------------------------------------------------------------------ #
       - name: Build slipstream (release)
         shell: pwsh
         run: cargo build --release --target x86_64-pc-windows-msvc
 
       # ------------------------------------------------------------------ #
-      # 6. Upload .exe artifacts
+      # 5. Upload .exe artifacts
       # ------------------------------------------------------------------ #
       - name: Collect artifacts
         shell: pwsh
