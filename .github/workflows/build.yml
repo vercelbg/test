@@ -1,49 +1,57 @@
-name: Package slipstream Windows releases
+name: Auto Release
 
 on:
-  workflow_dispatch:
   push:
-    tags:
-      - "v*"
+    branches: [main]
+
+permissions:
+  contents: write
 
 jobs:
-  package:
+  release:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Get latest release metadata
-        id: release
-        run: |
-          curl -s https://api.github.com/repos/Mygod/slipstream-rust/releases/latest > release.json
-
-      - name: Extract URLs
-        run: |
-          AMD64=$(jq -r '.assets[] | select(.name | test("windows.*amd64")) | .browser_download_url' release.json)
-          ARM64=$(jq -r '.assets[] | select(.name | test("windows.*arm64")) | .browser_download_url' release.json)
-          CHECKSUM=$(jq -r '.assets[] | select(.name | test("sha256|SHA256|checksum")) | .browser_download_url' release.json)
-
-          echo "AMD64=$AMD64" >> $GITHUB_ENV
-          echo "ARM64=$ARM64" >> $GITHUB_ENV
-          echo "CHECKSUM=$CHECKSUM" >> $GITHUB_ENV
-
-      - name: Download files
-        run: |
-          mkdir dist
-          curl -L "$AMD64" -o dist/windows-amd64.bin
-          curl -L "$ARM64" -o dist/windows-arm64.bin
-          if [ -n "$CHECKSUM" ]; then
-            curl -L "$CHECKSUM" -o dist/SHA256SUMS
-          fi
-
-      - name: Verify checksum
-        run: |
-          if [ -f dist/SHA256SUMS ]; then
-            cd dist
-            sha256sum -c SHA256SUMS || true
-          fi
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          name: slipstream-windows-packages
-          path: dist/
+          fetch-depth: 0
+
+      - name: Read version
+        id: version
+        run: |
+          VERSION=$(cat VERSION)
+          echo "current=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Bump patch version
+        id: bump
+        run: |
+          VERSION=$(cat VERSION)
+
+          IFS='.' read -r major minor patch <<< "$VERSION"
+          patch=$((patch + 1))
+
+          NEW_VERSION="$major.$minor.$patch"
+
+          echo "$NEW_VERSION" > VERSION
+          echo "new=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+          git add VERSION
+          git commit -m "chore: bump version to ${{ steps.bump.outputs.new }}" || echo "no changes"
+
+      - name: Create tag
+        run: |
+          git tag v${{ steps.bump.outputs.new }}
+          git push origin main --tags
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.bump.outputs.new }}
+          name: v${{ steps.bump.outputs.new }}
+          generate_release_notes: true
