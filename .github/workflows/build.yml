@@ -69,8 +69,8 @@ jobs:
           $content = $content -replace '"-G", "Visual Studio 17 2022"', '"-G", "Ninja"'
           $content = $content -replace '"-A", \$Platform', '# "-A", $Platform'
           
-          # Inject CMake verbose output options into the script arguments
-          $content = $content -replace '"-DCMAKE_POLICY_VERSION_MINIMUM=3.5"', '"-DCMAKE_POLICY_VERSION_MINIMUM=3.5",`n        "--v"'
+          # Inject CMake verbose output safely as a valid standalone array item
+          $content = $content -replace '"-DCMAKE_POLICY_VERSION_MINIMUM=3.5"', '"-DCMAKE_POLICY_VERSION_MINIMUM=3.5", "-DVERBOSE=ON"'
           
           Set-Content $scriptPath $content
           Write-Host "Patch applied successfully."
