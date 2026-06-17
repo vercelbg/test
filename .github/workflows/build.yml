@@ -56,8 +56,13 @@ jobs:
           restore-keys: picoquic-
 
       # ------------------------------------------------------------------ #
-      # 4. Patch and Build picoquic with Verbose Logging
+      # 4. Install Dependencies, Patch and Build picoquic
       # ------------------------------------------------------------------ #
+      - name: Install PkgConfig on Windows
+        run: |
+          choco install pkgconf -y
+          echo "C:\ProgramData\chocolatey\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
       - name: Patch Script to use Ninja Generator
         shell: pwsh
         run: |
