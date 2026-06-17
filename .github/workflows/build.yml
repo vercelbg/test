@@ -41,8 +41,9 @@ jobs:
           key: picoquic-${{ hashFiles('vendor/picoquic/**') }}-v1
           restore-keys: picoquic-
 
-      # Detect the actual installed VS version and patch the script's
-      # hardcoded "Visual Studio 17 2022" to match what's on the runner.
+      # The build script hardcodes "Visual Studio 17 2022" but the runner has
+      # VS 18. CMake has no VS 18 generator yet so we still use "17 2022",
+      # but must pass version=18.x in CMAKE_GENERATOR_INSTANCE (not a path).
       - name: Patch and run picoquic build script
         shell: pwsh
         run: |
@@ -53,26 +54,20 @@ jobs:
 
           if (!$vsInfo) { throw "vswhere could not find any Visual Studio installation" }
 
-          $majorVersion = [int]($vsInfo.installationVersion.Split('.')[0])
-          $yearMap = @{ 15 = "2017"; 16 = "2019"; 17 = "2022"; 18 = "2022" }
-          # VS 18 ships as "Visual Studio 17 2022" in CMake generator names
-          # because CMake hasn't added a VS 18 generator yet — but we still
-          # need to point it at the right install path explicitly.
-          $generatorVersion = if ($majorVersion -ge 18) { 17 } else { $majorVersion }
-          $generatorYear    = if ($majorVersion -ge 18) { "2022" } else { $yearMap[$majorVersion] }
-          $generator = "Visual Studio $generatorVersion $generatorYear"
+          $vsVersion = $vsInfo.installationVersion   # e.g. "18.6.11822.322"
+          $vsPath    = $vsInfo.installationPath       # e.g. "C:\Program Files\Microsoft Visual Studio\18\Enterprise"
+          Write-Host "Found VS $vsVersion at $vsPath"
 
-          Write-Host "Detected VS $($vsInfo.installationVersion) → using CMake generator: $generator"
-          Write-Host "VS install path: $($vsInfo.installationPath)"
+          # CMake expects CMAKE_GENERATOR_INSTANCE as "path,version=X.Y.Z"
+          # when the instance isn't registered the normal way (VS 18 case).
+          $instanceValue = "$vsPath,version=$vsVersion"
 
-          # Patch the hardcoded generator string in the script
           $scriptPath = "scripts/build_picoquic_windows.ps1"
           $content = Get-Content $scriptPath -Raw
-          $content = $content -replace '"Visual Studio \d+ \d+"', "`"$generator`""
 
-          # Also inject -DCMAKE_GENERATOR_INSTANCE so CMake finds this exact VS
-          $instanceArg = '"-DCMAKE_GENERATOR_INSTANCE=' + $vsInfo.installationPath.Replace('\','/') + '",'
-          $content = $content -replace '("-G", "Visual Studio[^"]+",)', "`$1`n        $instanceArg"
+          # Inject -DCMAKE_GENERATOR_INSTANCE right after the -G argument
+          $instanceArg = '"-DCMAKE_GENERATOR_INSTANCE=' + $instanceValue.Replace('\', '/') + '",'
+          $content = $content -replace '("-G",\s*"Visual Studio[^"]+",)', "`$1`n        $instanceArg"
 
           $patchedScript = "scripts/build_picoquic_windows_patched.ps1"
           $content | Set-Content $patchedScript -Encoding utf8
