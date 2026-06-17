@@ -24,7 +24,6 @@ jobs:
 
       # ------------------------------------------------------------------ #
       # 2. Set up Visual Studio 2022 + MSVC
-      #    windows-latest has VS installed but cmake needs the env activated
       # ------------------------------------------------------------------ #
       - name: Setup MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
@@ -57,21 +56,37 @@ jobs:
           restore-keys: picoquic-
 
       # ------------------------------------------------------------------ #
-      # 4. Build picoquic via the existing PowerShell script.
-      #    OpenSSL is already at C:\Program Files\OpenSSL on windows-latest.
-      #    The script finds it automatically and exports all PICOQUIC_* and
-      #    OPENSSL_* vars into $GITHUB_ENV for the next step.
+      # 4. Patch and Build picoquic with Verbose Logging
       # ------------------------------------------------------------------ #
+      - name: Patch Script to use Ninja Generator
+        shell: pwsh
+        run: |
+          Write-Host "Modifying build script to bypass Visual Studio compiler block..."
+          $scriptPath = "scripts/build_picoquic_windows.ps1"
+          $content = Get-Content $scriptPath -Raw
+          
+          # Replace VS generator with Ninja and comment out the unsupported -A flag
+          $content = $content -replace '"-G", "Visual Studio 17 2022"', '"-G", "Ninja"'
+          $content = $content -replace '"-A", \$Platform', '# "-A", $Platform'
+          
+          # Inject CMake verbose output options into the script arguments
+          $content = $content -replace '"-DCMAKE_POLICY_VERSION_MINIMUM=3.5"', '"-DCMAKE_POLICY_VERSION_MINIMUM=3.5",`n        "--v"'
+          
+          Set-Content $scriptPath $content
+          Write-Host "Patch applied successfully."
+
       - name: Build picoquic
         shell: pwsh
-        run: pwsh -File scripts/build_picoquic_windows.ps1
+        run: |
+          Write-Host "Starting picoquic generation script..."
+          pwsh -File scripts/build_picoquic_windows.ps1
 
       # ------------------------------------------------------------------ #
-      # 5. Cargo build — all env vars exported by the script above
+      # 5. Cargo build (with verbose flag)
       # ------------------------------------------------------------------ #
       - name: Build slipstream (release)
         shell: pwsh
-        run: cargo build --release --target x86_64-pc-windows-msvc
+        run: cargo build --release --target x86_64-pc-windows-msvc --verbose
 
       # ------------------------------------------------------------------ #
       # 6. Upload .exe artifacts
@@ -88,4 +103,34 @@ jobs:
         with:
           name: slipstream-windows-x64
           path: dist\*.exe
-          retention-days: 30
+          retention-days: 7
+
+      # ------------------------------------------------------------------ #
+      # 7. Troubleshooting / Debug Logs (Only runs if something fails)
+      # ------------------------------------------------------------------ #
+      - name: Diagnostics & Troubleshooting Logs
+        if: failure()
+        shell: pwsh
+        run: |
+          Write-Host "================== DETECTED BUILD FAILURE =================="
+          Write-Host "Dumping internal CMake environment logs for troubleshooting..."
+          
+          $cmakeDir = Get-ChildItem -Path . -Filter "CMakeSystem.cmake" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty DirectoryName
+          
+          if ($cmakeDir) {
+              $outputLog = Join-Path $cmakeDir "CMakeOutput.log"
+              $errorLog = Join-Path $cmakeDir "CMakeError.log"
+              
+              if (Test-Path $outputLog) {
+                  Write-Host "--- [START] CMakeOutput.log ---"
+                  Get-Content $outputLog -Tail 100
+                  Write-Host "--- [END] CMakeOutput.log ---"
+              }
+              if (Test-Path $errorLog) {
+                  Write-Host "--- [START] CMakeError.log ---"
+                  Get-Content $errorLog -Tail 150
+                  Write-Host "--- [END] CMakeError.log ---"
+              }
+          } else {
+              Write-Host "No explicit CMake logs found. The crash happened prior to CMake initialization."
+          }
