@@ -13,12 +13,27 @@ jobs:
     runs-on: windows-latest
 
     steps:
+      # ------------------------------------------------------------------ #
+      # 1. Checkout with submodules
+      # ------------------------------------------------------------------ #
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           repository: Mygod/slipstream-rust
           submodules: recursive
 
+      # ------------------------------------------------------------------ #
+      # 2. Set up Visual Studio 2022 + MSVC
+      #    windows-latest has VS installed but cmake needs the env activated
+      # ------------------------------------------------------------------ #
+      - name: Setup MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      # ------------------------------------------------------------------ #
+      # 3. Install Rust + MSVC target
+      # ------------------------------------------------------------------ #
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -41,45 +56,26 @@ jobs:
           key: picoquic-${{ hashFiles('vendor/picoquic/**') }}-v1
           restore-keys: picoquic-
 
-      - name: Patch and run picoquic build script
+      # ------------------------------------------------------------------ #
+      # 4. Build picoquic via the existing PowerShell script.
+      #    OpenSSL is already at C:\Program Files\OpenSSL on windows-latest.
+      #    The script finds it automatically and exports all PICOQUIC_* and
+      #    OPENSSL_* vars into $GITHUB_ENV for the next step.
+      # ------------------------------------------------------------------ #
+      - name: Build picoquic
         shell: pwsh
-        run: |
-          $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $vsInfo = & "$vsWhere" -latest -products * `
-            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
-            -format json | ConvertFrom-Json | Select-Object -First 1
+        run: pwsh -File scripts/build_picoquic_windows.ps1
 
-          if (!$vsInfo) { throw "vswhere could not find any Visual Studio installation" }
-
-          $vsVersion  = $vsInfo.installationVersion  # e.g. "18.6.11822.322"
-          $vsMajor    = [int]($vsVersion.Split('.')[0])  # 18
-          $vsPath     = $vsInfo.installationPath
-          Write-Host "Found VS $vsVersion (major=$vsMajor) at $vsPath"
-
-          # Map major version to CMake generator name.
-          # CMake 3.28+ supports "Visual Studio 18 2022" for VS 18.
-          $yearMap = @{ 15 = "2017"; 16 = "2019"; 17 = "2022"; 18 = "2022" }
-          $generatorName = "Visual Studio $vsMajor $($yearMap[$vsMajor])"
-          $instanceValue = "$vsPath,version=$vsVersion"
-          Write-Host "Using generator: $generatorName"
-          Write-Host "Instance: $instanceValue"
-
-          $content = Get-Content "scripts/build_picoquic_windows.ps1" -Raw
-
-          # 1. Replace the hardcoded generator string with the detected one
-          $content = $content -replace '"Visual Studio \d+ \d+"', "`"$generatorName`""
-
-          # 2. Inject CMAKE_GENERATOR_INSTANCE right after the -G line
-          $instanceArg = '"-DCMAKE_GENERATOR_INSTANCE=' + $instanceValue.Replace('\', '/') + '",'
-          $content = $content -replace '("-G",\s*"[^"]+",)', "`$1`n        $instanceArg"
-
-          $content | Set-Content "scripts/build_picoquic_windows_patched.ps1" -Encoding utf8
-          pwsh -File "scripts/build_picoquic_windows_patched.ps1"
-
+      # ------------------------------------------------------------------ #
+      # 5. Cargo build — all env vars exported by the script above
+      # ------------------------------------------------------------------ #
       - name: Build slipstream (release)
         shell: pwsh
         run: cargo build --release --target x86_64-pc-windows-msvc
 
+      # ------------------------------------------------------------------ #
+      # 6. Upload .exe artifacts
+      # ------------------------------------------------------------------ #
       - name: Collect artifacts
         shell: pwsh
         run: |
