@@ -1,4 +1,4 @@
-name: Auto Release (Windows unpack + checksum)
+name: Auto Release (Slipstream Windows)
 
 on:
   push:
@@ -12,14 +12,25 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Create workspace
+      # -------------------------
+      # Checkout (IMPORTANT FIX)
+      # -------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # -------------------------
+      # Setup workspace
+      # -------------------------
+      - name: Prepare folders
         run: |
           mkdir -p dist/amd64 dist/arm64 out
 
       # -------------------------
-      # Download assets
+      # Download upstream binaries
       # -------------------------
-      - name: Download Windows binaries
+      - name: Download Windows builds
         run: |
           curl -L "https://github.com/Mygod/slipstream-rust/releases/download/v0.1.1/slipstream-windows-x86_64.zip" \
             -o dist/amd64.zip
@@ -30,24 +41,24 @@ jobs:
       # -------------------------
       # Unzip
       # -------------------------
-      - name: Unzip files
+      - name: Unzip binaries
         run: |
-          unzip dist/amd64.zip -d dist/amd64
-          unzip dist/arm64.zip -d dist/arm64
+          unzip -q dist/amd64.zip -d dist/amd64
+          unzip -q dist/arm64.zip -d dist/arm64
 
       # -------------------------
       # Generate SHA256 checksums
       # -------------------------
-      - name: Create SHA256SUMS
+      - name: Generate SHA256SUMS
         run: |
           cd dist
 
-          find . -type f ! -name "SHA256SUMS" -exec sha256sum {} \; > SHA256SUMS
+          find amd64 arm64 -type f -exec sha256sum {} \; > SHA256SUMS
 
           mv SHA256SUMS ../out/SHA256SUMS
 
       # -------------------------
-      # Package final output
+      # Package release output
       # -------------------------
       - name: Prepare release files
         run: |
@@ -55,18 +66,18 @@ jobs:
           cp -r dist/arm64 out/
 
       # -------------------------
-      # Timestamp tag
+      # Generate timestamp tag
       # -------------------------
-      - name: Generate tag
+      - name: Create tag
         id: tag
         run: |
           TAG=$(date -u +"%Y%m%d-%H%M%S")
           echo "tag=$TAG" >> $GITHUB_OUTPUT
 
       # -------------------------
-      # Create git tag
+      # Create Git tag (safe now)
       # -------------------------
-      - name: Push tag
+      - name: Create git tag
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
@@ -75,9 +86,9 @@ jobs:
           git push origin ${{ steps.tag.outputs.tag }}
 
       # -------------------------
-      # Create release
+      # Create GitHub Release
       # -------------------------
-      - name: Create GitHub Release
+      - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
