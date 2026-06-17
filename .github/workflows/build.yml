@@ -5,7 +5,6 @@ on:
     branches: [main, master]
 
 env:
-  OPENSSL_VERSION: "3.5.7"
   CARGO_TERM_COLOR: always
 
 jobs:
@@ -15,144 +14,25 @@ jobs:
 
     steps:
       # ------------------------------------------------------------------ #
-      # 1. Checkout (with submodules so vendor/picoquic is present)
+      # 1. Checkout with submodules
       # ------------------------------------------------------------------ #
-      - name: checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           repository: Mygod/slipstream-rust
-          fetch-depth: 2
+          submodules: recursive
 
       # ------------------------------------------------------------------ #
-      # 2. Install build tools
+      # 2. Install OpenSSL via vcpkg
+      #    build_picoquic_windows.ps1 already searches vcpkg at
+      #    $env:VCPKG_INSTALLATION_ROOT with triplet x64-windows-static-md
       # ------------------------------------------------------------------ #
-      - name: Install NASM (required by OpenSSL build)
-        uses: ilammy/setup-nasm@v1
-
-      - name: Install Perl (required by OpenSSL Configure)
-        uses: shogo82148/actions-setup-perl@v1
-        with:
-          perl-version: "5.38"
-
-      - name: Setup MSVC environment
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
-      # ------------------------------------------------------------------ #
-      # 3. Cache OpenSSL build
-      # ------------------------------------------------------------------ #
-      - name: Cache OpenSSL
-        id: cache-openssl
-        uses: actions/cache@v4
-        with:
-          path: C:\openssl-install
-          key: openssl-${{ env.OPENSSL_VERSION }}-windows-x64-v1
-
-      # ------------------------------------------------------------------ #
-      # 4. Build OpenSSL from source (skipped if cached)
-      # ------------------------------------------------------------------ #
-      - name: Download OpenSSL source
-        if: steps.cache-openssl.outputs.cache-hit != 'true'
+      - name: Install OpenSSL (vcpkg x64-windows-static-md)
         shell: pwsh
-        run: |
-          $url = "https://github.com/openssl/openssl/releases/download/openssl-$env:OPENSSL_VERSION/openssl-$env:OPENSSL_VERSION.tar.gz"
-          Invoke-WebRequest -Uri $url -OutFile openssl.tar.gz
-          tar -xzf openssl.tar.gz
-          Rename-Item "openssl-$env:OPENSSL_VERSION" openssl-src
-
-      - name: Build OpenSSL
-        if: steps.cache-openssl.outputs.cache-hit != 'true'
-        shell: cmd
-        run: |
-          cd openssl-src
-          perl Configure VC-WIN64A no-shared no-tests --prefix=C:\openssl-install --openssldir=C:\openssl-install\ssl
-          nmake /S
-          nmake install_sw
+        run: ls && vcpkg install openssl:x64-windows-static-md
 
       # ------------------------------------------------------------------ #
-      # 5. Cache picoquic build
-      # ------------------------------------------------------------------ #
-      - name: Get picoquic submodule hash
-        id: picoquic-hash
-        shell: pwsh
-        run: |
-          $hash = git rev-parse HEAD:vendor/picoquic
-          echo "hash=$hash" >> $env:GITHUB_OUTPUT
-
-      - name: Cache picoquic libs
-        id: cache-picoquic
-        uses: actions/cache@v4
-        with:
-          path: picoquic-install
-          key: picoquic-${{ steps.picoquic-hash.outputs.hash }}-openssl-${{ env.OPENSSL_VERSION }}-v1
-
-      # ------------------------------------------------------------------ #
-      # 6. Build picoquic from source (skipped if cached)
-      # ------------------------------------------------------------------ #
-      - name: Configure picoquic (CMake)
-        if: steps.cache-picoquic.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          cmake -S vendor/picoquic -B picoquic-build `
-            -G "NMake Makefiles" `
-            -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_INSTALL_PREFIX="$PWD/picoquic-install" `
-            -DOPENSSL_ROOT_DIR="C:/openssl-install" `
-            -DOPENSSL_USE_STATIC_LIBS=ON `
-            -DBUILD_TESTING=OFF `
-            -DBUILD_DEMO=OFF `
-            -DBUILD_HTTP=OFF `
-            -DBUILD_LOGLIB=OFF `
-            -DBUILD_LOGREADER=OFF `
-            -DPICOQUIC_FETCH_PTLS=ON `
-            -DPTLS_WITH_FUSION=OFF
-
-      - name: Build picoquic
-        if: steps.cache-picoquic.outputs.cache-hit != 'true'
-        shell: cmd
-        run: |
-          cd picoquic-build
-          nmake /S
-
-      - name: Install picoquic libs
-        if: steps.cache-picoquic.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          # Collect all static libs into picoquic-install/lib and headers into picoquic-install/include
-          New-Item -ItemType Directory -Force -Path picoquic-install/lib
-          New-Item -ItemType Directory -Force -Path picoquic-install/include
-
-          # picoquic core lib
-          Copy-Item picoquic-build/picoquic-core.lib picoquic-install/lib/
-          Copy-Item picoquic-build/libpicoquic-core.a picoquic-install/lib/ -ErrorAction SilentlyContinue
-
-          # picotls libs (built by FetchContent inside picoquic-build/_deps)
-          Get-ChildItem -Recurse picoquic-build/_deps -Filter "*.lib" | ForEach-Object {
-            Copy-Item $_.FullName picoquic-install/lib/
-          }
-          Get-ChildItem -Recurse picoquic-build/_deps -Filter "*.a" | ForEach-Object {
-            Copy-Item $_.FullName picoquic-install/lib/ -ErrorAction SilentlyContinue
-          }
-
-          # headers
-          Copy-Item vendor/picoquic/picoquic/*.h picoquic-install/include/ -ErrorAction SilentlyContinue
-          Copy-Item vendor/picoquic/picoquic/picoquic.h picoquic-install/include/ -ErrorAction SilentlyContinue
-
-          # picotls headers
-          $ptlsSrc = Get-ChildItem -Recurse picoquic-build/_deps -Filter "picotls.h" | Select-Object -First 1
-          if ($ptlsSrc) {
-            $ptlsInclude = Split-Path $ptlsSrc.FullName
-            Copy-Item "$ptlsInclude/*.h" picoquic-install/include/ -ErrorAction SilentlyContinue
-          }
-
-          Write-Host "Installed libs:"
-          Get-ChildItem picoquic-install/lib/
-          Write-Host "Installed headers (sample):"
-          Get-ChildItem picoquic-install/include/ | Select-Object -First 10
-
-      # ------------------------------------------------------------------ #
-      # 7. Install Rust toolchain
+      # 3. Install Rust + MSVC target
       # ------------------------------------------------------------------ #
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -169,43 +49,31 @@ jobs:
           key: cargo-registry-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-registry-
 
-      - name: Cache Cargo build
-        uses: actions/cache@v4
-        with:
-          path: target
-          key: cargo-build-windows-msvc-${{ hashFiles('**/Cargo.lock') }}-${{ steps.picoquic-hash.outputs.hash }}-v1
-          restore-keys: cargo-build-windows-msvc-
+      # ------------------------------------------------------------------ #
+      # 4. Build picoquic via the existing PowerShell script.
+      #    It writes PICOQUIC_INCLUDE_DIR, PICOQUIC_LIB_DIR,
+      #    PICOTLS_INCLUDE_DIR, and all OPENSSL_* vars into $GITHUB_ENV
+      #    automatically, so cargo build picks them up in the next step.
+      # ------------------------------------------------------------------ #
+      - name: Build picoquic (via existing script)
+        shell: pwsh
+        run: pwsh -File scripts/build_picoquic_windows.ps1
 
       # ------------------------------------------------------------------ #
-      # 8. Build slipstream binaries
+      # 5. Cargo build — all env vars already exported by the script above
       # ------------------------------------------------------------------ #
       - name: Build slipstream (release)
         shell: pwsh
-        env:
-          OPENSSL_ROOT_DIR: C:\openssl-install
-          OPENSSL_INCLUDE_DIR: C:\openssl-install\include
-          OPENSSL_SSL_LIBRARY: C:\openssl-install\lib\libssl.lib
-          OPENSSL_CRYPTO_LIBRARY: C:\openssl-install\lib\libcrypto.lib
-          OPENSSL_STATIC: "1"
-          OPENSSL_USE_STATIC_LIBS: "1"
-          PICOQUIC_INCLUDE_DIR: ${{ github.workspace }}\picoquic-install\include
-          PICOQUIC_LIB_DIR: ${{ github.workspace }}\picoquic-install\lib
-          PICOTLS_INCLUDE_DIR: ${{ github.workspace }}\picoquic-install\include
-          PICOQUIC_AUTO_BUILD: "0"
-        run: |
-          cargo build --release --target x86_64-pc-windows-msvc
+        run: cargo build --release --target x86_64-pc-windows-msvc
 
       # ------------------------------------------------------------------ #
-      # 9. Upload artifacts
+      # 6. Upload .exe artifacts
       # ------------------------------------------------------------------ #
       - name: Collect artifacts
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist
-          Get-ChildItem target/x86_64-pc-windows-msvc/release/*.exe | ForEach-Object {
-            Copy-Item $_.FullName dist/
-          }
-          Write-Host "Artifacts:"
+          Get-ChildItem target/x86_64-pc-windows-msvc/release/*.exe | Copy-Item -Destination dist/
           Get-ChildItem dist/
 
       - name: Upload slipstream binaries
@@ -214,10 +82,3 @@ jobs:
           name: slipstream-windows-x64
           path: dist/*.exe
           retention-days: 30
-
-      - name: Upload picoquic libs (for debugging / reuse)
-        uses: actions/upload-artifact@v4
-        with:
-          name: picoquic-libs-windows-x64
-          path: picoquic-install/lib/
-          retention-days: 7
