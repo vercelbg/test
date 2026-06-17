@@ -9,21 +9,17 @@ jobs:
     name: Build (x86_64-pc-windows-msvc)
     runs-on: windows-latest
     steps:
-      # ------------------------------------------------------------------ #
-      # 1. Checkout with submodules
-      # ------------------------------------------------------------------ #
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           repository: Mygod/slipstream-rust
           submodules: recursive
-      # ------------------------------------------------------------------ #
-      # 2. Install Rust + MSVC target
-      # ------------------------------------------------------------------ #
+
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
+
       - name: Cache Cargo registry
         uses: actions/cache@v4
         with:
@@ -33,72 +29,61 @@ jobs:
             ${{ env.CARGO_HOME }}\git\db
           key: cargo-registry-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-registry-
+
       - name: Cache picoquic build
         uses: actions/cache@v4
         with:
           path: .picoquic-build
           key: picoquic-${{ hashFiles('vendor/picoquic/**') }}-v1
           restore-keys: picoquic-
+
       # ------------------------------------------------------------------ #
-      # 2.5. Ensure Visual Studio Build Tools + CMake are present
-      # windows-latest ships VS 2022 but let's make vswhere can find it
+      # Install VS 2022 Build Tools so "Visual Studio 17 2022" generator works
+      # windows-latest ships VS 2025 (v18) but the build script hardcodes v17
       # ------------------------------------------------------------------ #
-      - name: Install Visual Studio Build Tools components
+      - name: Install Visual Studio 2022 Build Tools
         shell: pwsh
         run: |
-          $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $vsPath = & $vsWhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
-          if ($vsPath) {
-            Write-Host "Visual Studio found at: $vsPath"
-          } else {
-            Write-Host "VS not found via vswhere, installing Build Tools..."
-            $url = "https://aka.ms/vs/17/release/vs_buildtools.exe"
-            $installer = "$env:TEMP\vs_buildtools.exe"
-            Invoke-WebRequest -Uri $url -OutFile $installer
-            & $installer --quiet --wait --norestart `
-              --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
-              --add Microsoft.VisualStudio.Component.Windows11SDK.22621
-            if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010) {
-              throw "VS Build Tools installation failed: $LASTEXITCODE"
-            }
+          $url = "https://aka.ms/vs/17/release/vs_buildtools.exe"
+          $installer = "$env:TEMP\vs_buildtools.exe"
+          Write-Host "Downloading VS 2022 Build Tools..."
+          Invoke-WebRequest -Uri $url -OutFile $installer -UseBasicParsing
+          Write-Host "Installing (this takes ~2-3 min)..."
+          $proc = Start-Process $installer -ArgumentList @(
+            "--quiet", "--wait", "--norestart", "--nocache",
+            "--add", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+            "--add", "Microsoft.VisualStudio.Component.Windows11SDK.22621"
+          ) -Wait -PassThru
+          Write-Host "Exit code: $($proc.ExitCode)"
+          if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
+            throw "VS 2022 Build Tools install failed: $($proc.ExitCode)"
           }
-      # ------------------------------------------------------------------ #
-      # 2.6. Setup MSVC Developer Command Prompt
-      # ------------------------------------------------------------------ #
+          $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $found = & $vsWhere -version "[17,18)" -products * -property installationPath
+          if (!$found) { throw "VS 17 not found after install" }
+          Write-Host "VS 2022 confirmed at: $found"
+
       - name: Setup MSVC Developer Command Prompt
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: amd64
-      # ------------------------------------------------------------------ #
-      # 2.7. Verify CMake and VS generator are functional
-      # ------------------------------------------------------------------ #
-      - name: Verify CMake + VS generator
-        shell: pwsh
-        run: |
-          cmake --version
-          $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          & $vsWhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-      # ------------------------------------------------------------------ #
-      # 3. Build picoquic via the existing PowerShell script
-      # ------------------------------------------------------------------ #
+          vsversion: "17"
+
       - name: Build picoquic
         shell: pwsh
         run: pwsh -File scripts/build_picoquic_windows.ps1
-      # ------------------------------------------------------------------ #
-      # 4. Cargo build — all env vars exported by the script above
-      # ------------------------------------------------------------------ #
+
       - name: Build slipstream (release)
         shell: pwsh
         run: cargo build --release --target x86_64-pc-windows-msvc
-      # ------------------------------------------------------------------ #
-      # 5. Upload .exe artifacts
-      # ------------------------------------------------------------------ #
+
       - name: Collect artifacts
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist
           Get-ChildItem target\x86_64-pc-windows-msvc\release\*.exe | Copy-Item -Destination dist\
           Get-ChildItem dist\
+
       - name: Upload slipstream binaries
         uses: actions/upload-artifact@v4
         with:
