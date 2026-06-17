@@ -22,16 +22,9 @@ jobs:
           repository: Mygod/slipstream-rust
           submodules: recursive
 
-      # ------------------------------------------------------------------ #
-      # 2. Set up Visual Studio 2022 + MSVC
-      # ------------------------------------------------------------------ #
-      - name: Setup MSVC environment
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
 
       # ------------------------------------------------------------------ #
-      # 3. Install Rust + MSVC target
+      # 2. Install Rust + MSVC target
       # ------------------------------------------------------------------ #
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -47,48 +40,27 @@ jobs:
             ${{ env.CARGO_HOME }}\git\db
           key: cargo-registry-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-registry-
-          
-      # ------------------------------------------------------------------ #
-      # 4. Install Dependencies, Patch and Build picoquic
-      # ------------------------------------------------------------------ #
-      - name: Install PkgConfig on Windows
-        run: |
-          choco install pkgconf -y
-          # Push to the global path for any downstream processes
-          echo "C:\ProgramData\chocolatey\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
 
-      - name: Patch Script to use Ninja Generator
-        shell: pwsh
-        run: |
-          Write-Host "Modifying build script to bypass Visual Studio compiler block and map dependencies..."
-          $scriptPath = "scripts/build_picoquic_windows.ps1"
-          $content = Get-Content $scriptPath -Raw
-          
-          # 1. Replace VS generator with Ninja and comment out the unsupported -A platform flag
-          $content = $content -replace '"-G", "Visual Studio 17 2022"', '"-G", "Ninja"'
-          $content = $content -replace '"-A", \$Platform', '# "-A", $Platform'
-          
-          # 2. Inject CMake verbose logging safely
-          $content = $content -replace '"-DCMAKE_POLICY_VERSION_MINIMUM=3.5"', '"-DCMAKE_POLICY_VERSION_MINIMUM=3.5", "-DVERBOSE=ON"'
-          
-          # 3. Explicitly force the absolute path to pkgconf.exe so CMake doesn't have to guess
-          $content = $content -replace '"-DPICOQUIC_FETCH_PTLS=ON"', '"-DPICOQUIC_FETCH_PTLS=ON", "-DPKG_CONFIG_EXECUTABLE=C:/ProgramData/chocolatey/bin/pkgconf.exe"'
-          
-          Set-Content $scriptPath $content
-          Write-Host "Patch applied successfully."
+      - name: Cache picoquic build
+        uses: actions/cache@v4
+        with:
+          path: .picoquic-build
+          key: picoquic-${{ hashFiles('vendor/picoquic/**') }}-v1
+          restore-keys: picoquic-
 
+      # ------------------------------------------------------------------ #
+      # 3. Build picoquic via the existing PowerShell script
+      # ------------------------------------------------------------------ #
       - name: Build picoquic
         shell: pwsh
-        run: |
-          Write-Host "Starting picoquic generation script..."
-          pwsh -File scripts/build_picoquic_windows.ps1
+        run: pwsh -File scripts/build_picoquic_windows.ps1
 
       # ------------------------------------------------------------------ #
-      # 5. Cargo build (with verbose flag)
+      # 5. Cargo build — all env vars exported by the script above
       # ------------------------------------------------------------------ #
       - name: Build slipstream (release)
         shell: pwsh
-        run: cargo build --release --target x86_64-pc-windows-msvc --verbose
+        run: cargo build --release --target x86_64-pc-windows-msvc
 
       # ------------------------------------------------------------------ #
       # 6. Upload .exe artifacts
@@ -105,34 +77,4 @@ jobs:
         with:
           name: slipstream-windows-x64
           path: dist\*.exe
-          retention-days: 7
-
-      # ------------------------------------------------------------------ #
-      # 7. Troubleshooting / Debug Logs (Only runs if something fails)
-      # ------------------------------------------------------------------ #
-      - name: Diagnostics & Troubleshooting Logs
-        if: failure()
-        shell: pwsh
-        run: |
-          Write-Host "================== DETECTED BUILD FAILURE =================="
-          Write-Host "Dumping internal CMake environment logs for troubleshooting..."
-          
-          $cmakeDir = Get-ChildItem -Path . -Filter "CMakeSystem.cmake" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty DirectoryName
-          
-          if ($cmakeDir) {
-              $outputLog = Join-Path $cmakeDir "CMakeOutput.log"
-              $errorLog = Join-Path $cmakeDir "CMakeError.log"
-              
-              if (Test-Path $outputLog) {
-                  Write-Host "--- [START] CMakeOutput.log ---"
-                  Get-Content $outputLog -Tail 100
-                  Write-Host "--- [END] CMakeOutput.log ---"
-              }
-              if (Test-Path $errorLog) {
-                  Write-Host "--- [START] CMakeError.log ---"
-                  Get-Content $errorLog -Tail 150
-                  Write-Host "--- [END] CMakeError.log ---"
-              }
-          } else {
-              Write-Host "No explicit CMake logs found. The crash happened prior to CMake initialization."
-          }
+          retention-days: 30
