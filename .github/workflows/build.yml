@@ -1,89 +1,101 @@
 name: Build Windows
+
 on:
   push:
     branches: [main, master]
+
 env:
   CARGO_TERM_COLOR: always
+
 jobs:
   build-windows:
-    name: Build (x86_64-pc-windows-msvc)
     runs-on: windows-latest
+
     steps:
+      # ------------------------------------------------------------
+      # Checkout
+      # ------------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           repository: Mygod/slipstream-rust
           submodules: recursive
 
+      # ------------------------------------------------------------
+      # Install Rust
+      # ------------------------------------------------------------
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
 
+      # ------------------------------------------------------------
+      # Install Ninja
+      # ------------------------------------------------------------
+      - name: Install Ninja
+        shell: pwsh
+        run: choco install ninja -y
+
+      # ------------------------------------------------------------
+      # Cache Cargo
+      # ------------------------------------------------------------
       - name: Cache Cargo registry
         uses: actions/cache@v4
         with:
           path: |
-            ${{ env.CARGO_HOME }}\registry\index
-            ${{ env.CARGO_HOME }}\registry\cache
-            ${{ env.CARGO_HOME }}\git\db
-          key: cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-registry-
+            C:\Users\runneradmin\.cargo\registry
+            C:\Users\runneradmin\.cargo\git
+          key: cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-
 
+      # ------------------------------------------------------------
+      # Cache picoquic
+      # ------------------------------------------------------------
       - name: Cache picoquic build
         uses: actions/cache@v4
         with:
           path: .picoquic-build
-          key: picoquic-${{ hashFiles('vendor/picoquic/**') }}-v1
+          key: picoquic-${{ hashFiles('vendor/picoquic/**') }}
           restore-keys: picoquic-
 
-      # ------------------------------------------------------------------ #
-      # Install VS 2022 Build Tools so "Visual Studio 17 2022" generator works
-      # windows-latest ships VS 2025 (v18) but the build script hardcodes v17
-      # ------------------------------------------------------------------ #
-      - name: Install Visual Studio 2022 Build Tools
+      # ------------------------------------------------------------
+      # 🔥 PATCH SCRIPT (THIS IS THE IMPORTANT PART)
+      # ------------------------------------------------------------
+      - name: Patch CMake generator to Ninja
         shell: pwsh
         run: |
-          $url = "https://aka.ms/vs/17/release/vs_buildtools.exe"
-          $installer = "$env:TEMP\vs_buildtools.exe"
-          Write-Host "Downloading VS 2022 Build Tools..."
-          Invoke-WebRequest -Uri $url -OutFile $installer -UseBasicParsing
-          Write-Host "Installing (this takes ~2-3 min)..."
-          $proc = Start-Process $installer -ArgumentList @(
-            "--quiet", "--wait", "--norestart", "--nocache",
-            "--add", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
-            "--add", "Microsoft.VisualStudio.Component.Windows11SDK.22621"
-          ) -Wait -PassThru
-          Write-Host "Exit code: $($proc.ExitCode)"
-          if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
-            throw "VS 2022 Build Tools install failed: $($proc.ExitCode)"
-          }
-          $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $found = & $vsWhere -version "[17,18)" -products * -property installationPath
-          if (!$found) { throw "VS 17 not found after install" }
-          Write-Host "VS 2022 confirmed at: $found"
+          $file = "scripts/build_picoquic_windows.ps1"
+          (Get-Content $file) `
+            -replace '"Visual Studio 17 2022"', '"Ninja"' `
+            | Set-Content $file
 
-      - name: Setup MSVC Developer Command Prompt
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: amd64
-          vsversion: "17"
-
+      # ------------------------------------------------------------
+      # Build picoquic
+      # ------------------------------------------------------------
       - name: Build picoquic
         shell: pwsh
         run: pwsh -File scripts/build_picoquic_windows.ps1
 
+      # ------------------------------------------------------------
+      # Build Rust project
+      # ------------------------------------------------------------
       - name: Build slipstream (release)
         shell: pwsh
         run: cargo build --release --target x86_64-pc-windows-msvc
 
+      # ------------------------------------------------------------
+      # Collect artifacts
+      # ------------------------------------------------------------
       - name: Collect artifacts
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist
-          Get-ChildItem target\x86_64-pc-windows-msvc\release\*.exe | Copy-Item -Destination dist\
-          Get-ChildItem dist\
+          Copy-Item target\x86_64-pc-windows-msvc\release\*.exe dist\
+          Get-ChildItem dist
 
+      # ------------------------------------------------------------
+      # Upload artifacts
+      # ------------------------------------------------------------
       - name: Upload slipstream binaries
         uses: actions/upload-artifact@v4
         with:
