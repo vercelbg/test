@@ -1,4 +1,4 @@
-name: Auto Release (Windows assets)
+name: Auto Release (Windows unpack + checksum)
 
 on:
   push:
@@ -12,34 +12,61 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Get latest release JSON
+      - name: Create workspace
         run: |
-          curl -s https://api.github.com/repos/Mygod/slipstream-rust/releases/latest > release.json
+          mkdir -p dist/amd64 dist/arm64 out
 
-      - name: Extract Windows asset URLs
-        run: |
-          AMD64_URL=$(jq -r '.assets[] | select(.name | test("windows.*amd64")) | .browser_download_url' release.json)
-          ARM64_URL=$(jq -r '.assets[] | select(.name | test("windows.*arm64")) | .browser_download_url' release.json)
-
-          echo "AMD64_URL=$AMD64_URL" >> $GITHUB_ENV
-          echo "ARM64_URL=$ARM64_URL" >> $GITHUB_ENV
-
+      # -------------------------
+      # Download assets
+      # -------------------------
       - name: Download Windows binaries
         run: |
-          mkdir dist
-          echo "AMD64: $AMD64_URL"
-          echo "ARM64: $ARM64_URL"
+          curl -L "https://github.com/Mygod/slipstream-rust/releases/download/v0.1.1/slipstream-windows-x86_64.zip" \
+            -o dist/amd64.zip
 
-          curl -L "$AMD64_URL" -o dist/windows-amd64.exe
-          curl -L "$ARM64_URL" -o dist/windows-arm64.exe
+          curl -L "https://github.com/Mygod/slipstream-rust/releases/download/v0.1.1/slipstream-windows-arm64.zip" \
+            -o dist/arm64.zip
 
-      - name: Generate timestamp tag
+      # -------------------------
+      # Unzip
+      # -------------------------
+      - name: Unzip files
+        run: |
+          unzip dist/amd64.zip -d dist/amd64
+          unzip dist/arm64.zip -d dist/arm64
+
+      # -------------------------
+      # Generate SHA256 checksums
+      # -------------------------
+      - name: Create SHA256SUMS
+        run: |
+          cd dist
+
+          find . -type f ! -name "SHA256SUMS" -exec sha256sum {} \; > SHA256SUMS
+
+          mv SHA256SUMS ../out/SHA256SUMS
+
+      # -------------------------
+      # Package final output
+      # -------------------------
+      - name: Prepare release files
+        run: |
+          cp -r dist/amd64 out/
+          cp -r dist/arm64 out/
+
+      # -------------------------
+      # Timestamp tag
+      # -------------------------
+      - name: Generate tag
         id: tag
         run: |
           TAG=$(date -u +"%Y%m%d-%H%M%S")
           echo "tag=$TAG" >> $GITHUB_OUTPUT
 
-      - name: Create git tag
+      # -------------------------
+      # Create git tag
+      # -------------------------
+      - name: Push tag
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
@@ -47,10 +74,13 @@ jobs:
           git tag ${{ steps.tag.outputs.tag }}
           git push origin ${{ steps.tag.outputs.tag }}
 
-      - name: Create GitHub release + upload assets
+      # -------------------------
+      # Create release
+      # -------------------------
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: slipstream ${{ steps.tag.outputs.tag }}
-          files: dist/*
+          files: out/**
           generate_release_notes: true
