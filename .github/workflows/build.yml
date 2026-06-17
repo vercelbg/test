@@ -1,17 +1,13 @@
 name: Build Windows
-
 on:
   push:
     branches: [main, master]
-
 env:
   CARGO_TERM_COLOR: always
-
 jobs:
   build-windows:
     name: Build (x86_64-pc-windows-msvc)
     runs-on: windows-latest
-
     steps:
       # ------------------------------------------------------------------ #
       # 1. Checkout with submodules
@@ -21,38 +17,13 @@ jobs:
         with:
           repository: Mygod/slipstream-rust
           submodules: recursive
-
       # ------------------------------------------------------------------ #
-      # 2. Install Visual Studio Build Tools (required for CMake + picoquic)
-      # ------------------------------------------------------------------ #
-      - name: Install Visual Studio Build Tools
-        shell: pwsh
-        run: |
-          $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $vsInstaller = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
-          
-          if (Test-Path $vsInstaller) {
-            Write-Host "Installing Visual Studio Build Tools with C++ workload..."
-            & $vsInstaller modify --installPath (Resolve-Path "${env:ProgramFiles}\Microsoft Visual Studio\2022\Enterprise") `
-              --add Microsoft.VisualStudio.Workload.VCTools `
-              --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
-              --includeRecommended `
-              --quiet `
-              --wait `
-              --norestart
-          } else {
-            Write-Host "Visual Studio Installer not found. Installing via Chocolatey..."
-            choco install visualstudio2022buildtools -y --params "--add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --includeRecommended --quiet"
-          }
-
-      # ------------------------------------------------------------------ #
-      # 3. Install Rust + MSVC target
+      # 2. Install Rust + MSVC target
       # ------------------------------------------------------------------ #
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
-
       - name: Cache Cargo registry
         uses: actions/cache@v4
         with:
@@ -62,30 +33,33 @@ jobs:
             ${{ env.CARGO_HOME }}\git\db
           key: cargo-registry-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-registry-
-
       - name: Cache picoquic build
         uses: actions/cache@v4
         with:
           path: .picoquic-build
-          key: picoquic-${{ hashFiles('vendor/picoquic/**') }}-v2
+          key: picoquic-${{ hashFiles('vendor/picoquic/**') }}-v1
           restore-keys: picoquic-
-
       # ------------------------------------------------------------------ #
-      # 4. Build picoquic via the existing PowerShell script
+      # 2.5. Setup MSVC Developer Command Prompt
+      # ------------------------------------------------------------------ #
+      - name: Setup MSVC Developer Command Prompt
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64
+      # ------------------------------------------------------------------ #
+      # 3. Build picoquic via the existing PowerShell script
       # ------------------------------------------------------------------ #
       - name: Build picoquic
         shell: pwsh
         run: pwsh -File scripts/build_picoquic_windows.ps1
-
       # ------------------------------------------------------------------ #
-      # 5. Cargo build — all env vars exported by the script above
+      # 4. Cargo build — all env vars exported by the script above
       # ------------------------------------------------------------------ #
       - name: Build slipstream (release)
         shell: pwsh
         run: cargo build --release --target x86_64-pc-windows-msvc
-
       # ------------------------------------------------------------------ #
-      # 6. Upload .exe artifacts
+      # 5. Upload .exe artifacts
       # ------------------------------------------------------------------ #
       - name: Collect artifacts
         shell: pwsh
@@ -93,7 +67,6 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist
           Get-ChildItem target\x86_64-pc-windows-msvc\release\*.exe | Copy-Item -Destination dist\
           Get-ChildItem dist\
-
       - name: Upload slipstream binaries
         uses: actions/upload-artifact@v4
         with:
