@@ -1,104 +1,49 @@
-name: Build Windows
+name: Package slipstream Windows releases
 
 on:
+  workflow_dispatch:
   push:
-    branches: [main, master]
-
-env:
-  CARGO_TERM_COLOR: always
+    tags:
+      - "v*"
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
+  package:
+    runs-on: ubuntu-latest
 
     steps:
-      # ------------------------------------------------------------
-      # Checkout
-      # ------------------------------------------------------------
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          repository: Mygod/slipstream-rust
-          submodules: recursive
-
-      # ------------------------------------------------------------
-      # Install Rust
-      # ------------------------------------------------------------
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
-
-      # ------------------------------------------------------------
-      # Install Ninja
-      # ------------------------------------------------------------
-      - name: Install Ninja
-        shell: pwsh
-        run: choco install ninja -y
-
-      # ------------------------------------------------------------
-      # Cache Cargo
-      # ------------------------------------------------------------
-      - name: Cache Cargo registry
-        uses: actions/cache@v4
-        with:
-          path: |
-            C:\Users\runneradmin\.cargo\registry
-            C:\Users\runneradmin\.cargo\git
-          key: cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-
-
-      # ------------------------------------------------------------
-      # Cache picoquic
-      # ------------------------------------------------------------
-      - name: Cache picoquic build
-        uses: actions/cache@v4
-        with:
-          path: .picoquic-build
-          key: picoquic-${{ hashFiles('vendor/picoquic/**') }}
-          restore-keys: picoquic-
-
-      # ------------------------------------------------------------
-      # 🔥 PATCH SCRIPT (THIS IS THE IMPORTANT PART)
-      # ------------------------------------------------------------
-      - name: Patch CMake generator to Ninja
-        shell: pwsh
+      - name: Get latest release metadata
+        id: release
         run: |
-          $file = "scripts/build_picoquic_windows.ps1"
-          (Get-Content $file) `
-            -replace '"Visual Studio 17 2022"', '"Ninja"' `
-            | Set-Content $file
+          curl -s https://api.github.com/repos/Mygod/slipstream-rust/releases/latest > release.json
 
-      # ------------------------------------------------------------
-      # Build picoquic
-      # ------------------------------------------------------------
-      - name: Build picoquic
-        shell: pwsh
-        run: pwsh -File scripts/build_picoquic_windows.ps1
-
-      # ------------------------------------------------------------
-      # Build Rust project
-      # ------------------------------------------------------------
-      - name: Build slipstream (release)
-        shell: pwsh
-        run: cargo build --release --target x86_64-pc-windows-msvc
-
-      # ------------------------------------------------------------
-      # Collect artifacts
-      # ------------------------------------------------------------
-      - name: Collect artifacts
-        shell: pwsh
+      - name: Extract URLs
         run: |
-          New-Item -ItemType Directory -Force -Path dist
-          Copy-Item target\x86_64-pc-windows-msvc\release\*.exe dist\
-          Get-ChildItem dist
+          AMD64=$(jq -r '.assets[] | select(.name | test("windows.*amd64")) | .browser_download_url' release.json)
+          ARM64=$(jq -r '.assets[] | select(.name | test("windows.*arm64")) | .browser_download_url' release.json)
+          CHECKSUM=$(jq -r '.assets[] | select(.name | test("sha256|SHA256|checksum")) | .browser_download_url' release.json)
 
-      # ------------------------------------------------------------
-      # Upload artifacts
-      # ------------------------------------------------------------
-      - name: Upload slipstream binaries
+          echo "AMD64=$AMD64" >> $GITHUB_ENV
+          echo "ARM64=$ARM64" >> $GITHUB_ENV
+          echo "CHECKSUM=$CHECKSUM" >> $GITHUB_ENV
+
+      - name: Download files
+        run: |
+          mkdir dist
+          curl -L "$AMD64" -o dist/windows-amd64.bin
+          curl -L "$ARM64" -o dist/windows-arm64.bin
+          if [ -n "$CHECKSUM" ]; then
+            curl -L "$CHECKSUM" -o dist/SHA256SUMS
+          fi
+
+      - name: Verify checksum
+        run: |
+          if [ -f dist/SHA256SUMS ]; then
+            cd dist
+            sha256sum -c SHA256SUMS || true
+          fi
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: slipstream-windows-x64
-          path: dist\*.exe
-          retention-days: 30
+          name: slipstream-windows-packages
+          path: dist/
