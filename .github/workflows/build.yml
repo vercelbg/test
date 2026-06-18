@@ -130,13 +130,6 @@ jobs:
           path: dist/
           merge-multiple: true
 
-      - name: Make Release Script Executable
-        run: chmod +x ./release.sh
-
-      - name: Execute Stage 2 Release Aggregator
-        run: ./release.sh
-
-      # Resolve the correct release tag context and determine if it's a prerelease
       - name: Determine Tag and Release Status Context
         id: context
         run: |
@@ -148,6 +141,14 @@ jobs:
             echo "is_prerelease=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Make Release Script Executable
+        run: chmod +x ./release.sh
+
+      - name: Execute Stage 2 Release Aggregator
+        env:
+          GITHUB_REF_NAME: ${{ steps.context.outputs.release_tag }}
+        run: ./release.sh
+
       - name: Deploy Monolithic GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -155,6 +156,6 @@ jobs:
           prerelease: ${{ steps.context.outputs.is_prerelease }}
           files: |
             release/*
-          body_path: release/checksum.txt
+          body_path: release/release_notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
