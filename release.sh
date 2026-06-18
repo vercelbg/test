@@ -105,7 +105,7 @@ done
 # ==============================================================================
 log "4. Formatting production Markdown release template"
 
-# Helper function to generate clean direct download links
+# Helper function to generate explicit direct download links
 get_link() {
     local name="$1"
     local clean_repo="${REPO_URL%/}"
