@@ -65,12 +65,20 @@ log "Processing windows-amd64..."
 mkdir -p "$TEMP_DIR/ext_amd64"
 run unzip -q "$TEMP_DIR/amd64.zip" -d "$TEMP_DIR/ext_amd64"
 
-# Find and stage the binaries (using case-insensitive search just in case)
-mv "$TEMP_DIR/ext_amd64"/slipstream-client*.exe "$DIST_DIR/slipstream-client-windows-amd64.exe" 2>/dev/null || \
-mv "$TEMP_DIR/ext_amd64"/*.exe "$DIST_DIR/slipstream-client-windows-amd64.exe"
+# Stage Client AMD64
+if ls "$TEMP_DIR/ext_amd64"/slipstream-client*.exe >/dev/null 2>&1; then
+    mv "$TEMP_DIR/ext_amd64"/slipstream-client*.exe "$DIST_DIR/slipstream-client-windows-amd64.exe"
+else
+    echo "Warning: Specific client binary name not found, trying fallback matching."
+    mv "$TEMP_DIR/ext_amd64"/*client*.exe "$DIST_DIR/slipstream-client-windows-amd64.exe" 2>/dev/null || true
+fi
 
-# If the release also contains a server binary, rename it accordingly:
-# mv "$TEMP_DIR/ext_amd64"/slipstream-server*.exe "$DIST_DIR/slipstream-server-windows-amd64.exe" 2>/dev/null || true
+# Stage Server AMD64
+if ls "$TEMP_DIR/ext_amd64"/slipstream-server*.exe >/dev/null 2>&1; then
+    mv "$TEMP_DIR/ext_amd64"/slipstream-server*.exe "$DIST_DIR/slipstream-server-windows-amd64.exe"
+else
+    mv "$TEMP_DIR/ext_amd64"/*server*.exe "$DIST_DIR/slipstream-server-windows-amd64.exe" 2>/dev/null || true
+fi
 
 
 # --- Process ARM64 ---
@@ -78,11 +86,20 @@ log "Processing windows-arm64..."
 mkdir -p "$TEMP_DIR/ext_arm64"
 run unzip -q "$TEMP_DIR/arm64.zip" -d "$TEMP_DIR/ext_arm64"
 
-mv "$TEMP_DIR/ext_arm64"/slipstream-client*.exe "$DIST_DIR/slipstream-client-windows-arm64.exe" 2>/dev/null || \
-mv "$TEMP_DIR/ext_arm64"/*.exe "$DIST_DIR/slipstream-client-windows-arm64.exe"
+# Stage Client ARM64
+if ls "$TEMP_DIR/ext_arm64"/slipstream-client*.exe >/dev/null 2>&1; then
+    mv "$TEMP_DIR/ext_arm64"/slipstream-client*.exe "$DIST_DIR/slipstream-client-windows-arm64.exe"
+else
+    echo "Warning: Specific client binary name not found, trying fallback matching."
+    mv "$TEMP_DIR/ext_arm64"/*client*.exe "$DIST_DIR/slipstream-client-windows-arm64.exe" 2>/dev/null || true
+fi
 
-# If the release also contains a server binary, rename it accordingly:
-# mv "$TEMP_DIR/ext_arm64"/slipstream-server*.exe "$DIST_DIR/slipstream-server-windows-arm64.exe" 2>/dev/null || true
+# Stage Server ARM64
+if ls "$TEMP_DIR/ext_arm64"/slipstream-server*.exe >/dev/null 2>&1; then
+    mv "$TEMP_DIR/ext_arm64"/slipstream-server*.exe "$DIST_DIR/slipstream-server-windows-arm64.exe"
+else
+    mv "$TEMP_DIR/ext_arm64"/*server*.exe "$DIST_DIR/slipstream-server-windows-arm64.exe" 2>/dev/null || true
+fi
 
 # Clean up working tree remnants
 rm -rf "$TEMP_DIR"
