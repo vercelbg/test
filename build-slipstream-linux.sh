@@ -11,7 +11,7 @@ set -euo pipefail
 # ==============================================================================
 # CONFIGURATION & ENVIRONMENT SETUP
 # ==============================================================================
-OPENSSL_VERSION="openssl-3.0.20"
+OPENSSL_VERSION="openssl-3.5"
 REPO_URL="https://github.com/Mygod/slipstream-rust.git"
 ROOT_DIR="$HOME"
 PROJECT_DIR="$ROOT_DIR/slipstream-rust"
@@ -265,6 +265,14 @@ EOF
     local norm_arch="$label"
     if [ "$label" == "arm64" ]; then
         norm_arch="armv8"
+    fi
+    
+    if [ "$label" == "arm32" ]; then
+        norm_arch="armv7"
+    fi
+    
+    if [ "$label" == "amd32" ]; then
+        norm_arch="386"
     fi
 
     log "Staging normalized binaries into global distribution path"
