@@ -74,6 +74,14 @@ jobs:
       fail-fast: false
       matrix:
         target:
+          - name: slipstream-android
+            script: ./build-slipstream-android.sh
+          - name: slipstream-linux
+            script: ./build-slipstream-linux.sh
+          - name: slipstream-macos
+            script: ./build-slipstream-macos.sh
+          - name: slipstream-windows-prebuilt
+            script: ./fetch-slipstream-windows.sh
           - name: dnstt-android
             script: ./build-dnstt-android.sh
           - name: dnstt-linux
@@ -82,8 +90,6 @@ jobs:
             script: ./build-dnstt-macos.sh
           - name: dnstt-windows
             script: ./build-dnstt-windows.sh
-          - name: slipstream-windows-prebuilt
-            script: ./fetch-slipstream-windows.sh
 
     steps:
       - name: Checkout Code Repository
@@ -147,6 +153,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.context.outputs.release_tag }}
+          name: "dep-bgscan ${{ steps.context.outputs.release_tag }}"
           prerelease: ${{ steps.context.outputs.is_prerelease }}
           files: |
             release/*
