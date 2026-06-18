@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - 'v*'
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
   workflow_dispatch: 
     inputs:
       version:
@@ -136,9 +141,15 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "release_tag=${{ needs.create-git-tag.outputs.final_tag }}" >> $GITHUB_OUTPUT
             echo "is_prerelease=${{ github.event.inputs.prerelease }}" >> $GITHUB_OUTPUT
-          else
+          elif [[ "${{ github.ref_name }}" == v* ]]; then
+            # Direct Git Tag triggers use the tag name cleanly
             echo "release_tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
             echo "is_prerelease=false" >> $GITHUB_OUTPUT
+          else
+            # Branch builds (push/PR to main) generate a precise date-time pre-release tag
+            TIMESTAMP_TAG="v$(date +'%Y%m%d-%H%M%S')"
+            echo "release_tag=$TIMESTAMP_TAG" >> $GITHUB_OUTPUT
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
           fi
 
       - name: Make Release Script Executable
