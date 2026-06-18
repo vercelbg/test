@@ -145,9 +145,7 @@ jobs:
         run: chmod +x ./release.sh
 
       - name: Execute Stage 2 Release Aggregator
-        env:
-          GITHUB_REF_NAME: ${{ steps.context.outputs.release_tag }}
-        run: ./release.sh
+        run: ./release.sh "${{ steps.context.outputs.release_tag }}"
 
       - name: Deploy Monolithic GitHub Release
         uses: softprops/action-gh-release@v2
