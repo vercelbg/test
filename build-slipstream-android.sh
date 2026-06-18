@@ -17,7 +17,7 @@ REPO_URL="https://github.com/Mygod/slipstream-rust.git"
 
 ROOT_DIR="$HOME"
 PROJECT_DIR="$ROOT_DIR/slipstream-rust"
-DIST_DIR="$PROJECT_DIR/dist"
+DIST_DIR="$PWD/dist"
 
 # NDK Toolchain Path Calculations
 NDK_DIR="$ROOT_DIR/android-ndk-$NDK_VERSION"
