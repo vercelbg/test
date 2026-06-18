@@ -108,7 +108,8 @@ log "4. Formatting production Markdown release template"
 # Helper function to generate clean direct download links
 get_link() {
     local name="$1"
-    echo "[$2]($REPO_URL/releases/download/$TAG_VERSION/$name)"
+    local clean_repo="${REPO_URL%/}"
+    echo "[$2]($clean_repo/releases/download/$TAG_VERSION/$name)"
 }
 
 : > "$NOTES_FILE"
