@@ -56,6 +56,30 @@ sudo apt-get install -y \
     cmake ninja-build build-essential pkg-config unzip wget git perl make gcc curl
 
 # ==============================================================================
+# RUST TOOLCHAIN BOOTSTRAP
+# ==============================================================================
+if ! command -v rustup &>/dev/null; then
+    echo "Installing Rust..."
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+fi
+
+source "$HOME/.cargo/env"
+
+rustup default stable
+
+log "Installing Rust Android targets"
+run rustup target add \
+    aarch64-linux-android \
+    armv7-linux-androideabi \
+    i686-linux-android \
+    x86_64-linux-android
+
+log "Installing cargo-ndk"
+if ! command -v cargo-ndk &>/dev/null; then
+    run cargo install cargo-ndk
+fi
+
+# ==============================================================================
 # 2. TOOLCHAIN & PATH ACQUISITION (ANDROID NDK)
 # ==============================================================================
 log "2. Android NDK"
