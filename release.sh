@@ -4,21 +4,30 @@
 # Description:    Stage 2 automated asset packaging. Generates matching zip/tar
 #                 archives, computes a raw/archive checksum manifest file, and
 #                 produces table-based Markdown release notes.
+# Requirement:    STRICTLY requires the release tag version as the 1st argument.
 # ==============================================================================
 
 set -euo pipefail
 
 # ==============================================================================
-# CONFIGURATION & ENVIRONMENT SETUP
+# CONFIGURATION & ENVIRONMENT SETUP (STRICT ARGUMENT VERIFICATION)
 # ==============================================================================
+# Verify that the first argument is present and not empty
+if [ "${1:-}" = "" ]; then
+    echo "======================================================================" >&2
+    echo "CRITICAL ERROR: Missing required version tag argument." >&2
+    echo "Usage: $0 <tag_version> (e.g., $0 v1.8)" >&2
+    echo "======================================================================" >&2
+    exit 1
+fi
+
+TAG_VERSION="$1"
 ROOT_DIR="$PWD"
 DIST_DIR="$ROOT_DIR/dist"
 RELEASE_DIR="$ROOT_DIR/release"
 CHECKSUM_FILE="$RELEASE_DIR/checksum.txt"
 NOTES_FILE="$RELEASE_DIR/release_notes.md"
 
-# Fallback tag name if run locally outside of GitHub Actions
-TAG_VERSION="${GITHUB_REF_NAME:-vManual}"
 REPO_URL="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-user/repo}"
 
 log() {
@@ -31,7 +40,7 @@ log() {
 # ==============================================================================
 # 1. PREREQUISITES & HOST DEPENDENCIES
 # ==============================================================================
-log "1. Installing release runner dependencies"
+log "1. Installing release runner dependencies (Targeting: $TAG_VERSION)"
 
 sudo apt-get update -y
 sudo apt-get install -y zip tar coreutils
@@ -105,7 +114,7 @@ done
 # ==============================================================================
 log "4. Formatting production Markdown release template"
 
-# Helper function to generate explicit direct download links
+# Helper function to generate clean direct download links matching the exact GitHub Release pattern
 get_link() {
     local name="$1"
     local clean_repo="${REPO_URL%/}"
@@ -197,4 +206,4 @@ These binaries are required by the **BgScanner (Background Scanner)** engine to 
 | 🤖 **Android** x86_64 | Compressed Tarball | $(get_link "dnstt-server-android-amd64.tar.gz" "📦 Download (.tar.gz)") |
 EOF
 
-log "STAGING, PACKAGING, AND DOCUMENTATION MET SUCCESSFUL"
+log "STAGING, PACKAGING, AND DOCUMENTATION MET SUCCESSFUL WITH TAG: $TAG_VERSION"
