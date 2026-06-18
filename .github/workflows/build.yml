@@ -116,6 +116,10 @@ jobs:
   publish-release:
     name: Package Assets & Publish Release
     needs: [create-git-tag, build-assets]
+    if: |
+      always() &&
+      (needs.create-git-tag.result == 'success' || needs.create-git-tag.result == 'skipped') &&
+      needs.build-assets.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code Repository
