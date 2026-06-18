@@ -82,12 +82,6 @@ jobs:
             script: ./build-dnstt-macos.sh
           - name: dnstt-windows
             script: ./build-dnstt-windows.sh
-          - name: slipstream-android
-            script: ./build-slipstream-android.sh
-          - name: slipstream-linux
-            script: ./build-slipstream-linux.sh
-          - name: slipstream-macos
-            script: ./build-slipstream-macos.sh
           - name: slipstream-windows-prebuilt
             script: ./fetch-slipstream-windows.sh
 
