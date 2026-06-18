@@ -266,7 +266,7 @@ build_target() {
     case "$ABI" in
         "arm64-v8a")   final_arch="arm64" ;;
         "armeabi-v7a") final_arch="armv7" ;;
-        "x86")         final_arch="386"   ;;
+        "x86")         final_arch="x86"   ;;
         "x86_64")      final_arch="amd64" ;;
         *)             final_arch="$ABI"  ;;
     esac
