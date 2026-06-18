@@ -77,11 +77,11 @@ jobs:
           - name: dnstt-android
             script: ./build-dnstt-android.sh
           - name: dnstt-linux
-            script: ./build-linux-dnstt.sh
+            script: ./build-dnstt-linux.sh
           - name: dnstt-macos
-            script: ./build-macos-dnstt.sh
+            script: ./build-dnstt-macos.sh
           - name: dnstt-windows
-            script: ./build-windows-dnstt.sh
+            script: ./build-dnstt-windows.sh
           - name: slipstream-android
             script: ./build-slipstream-android.sh
           - name: slipstream-linux
@@ -89,7 +89,7 @@ jobs:
           - name: slipstream-macos
             script: ./build-slipstream-macos.sh
           - name: slipstream-windows-prebuilt
-            script: ./fetch-windows-slipstream.sh
+            script: ./fetch-slipstream-windows.sh
 
     steps:
       - name: Checkout Code Repository
