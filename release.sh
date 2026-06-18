@@ -124,12 +124,12 @@ get_link() {
 : > "$NOTES_FILE"
 
 cat << EOF >> "$NOTES_FILE"
-# 🛡️ Dependency Background Scan — Release Package ($TAG_VERSION)
+# 🛡️ Dependency BG Scan — Release Package ($TAG_VERSION)
 
 This release contains the verified, automated builds for **Slipstream** and **DNSTT** dependency binaries.
 
 ### 🔍 Transparent Security & Verification
-These binaries are required by the **BgScanner (Background Scanner)** engine to handle secure network transport and tunnel routing protocols. Instead of bundling unverified, opaque binaries inside the scanner, all assets listed below are generated transparently in the cloud via GitHub Actions. This public compilation pipeline guarantees that the binaries are un-tampered, safe, and directly auditable from the source repository.
+These binaries are required by the **BgScanner** engine to handle secure network transport and tunnel routing protocols. Instead of bundling unverified, opaque binaries inside the scanner, all assets listed below are generated transparently in the cloud via GitHub Actions. This public compilation pipeline guarantees that the binaries are un-tampered, safe, and directly auditable from the source repository.
 
 ---
 
