@@ -25,7 +25,7 @@ OPENSSL_ARM64="$ROOT_DIR/macos-openssl-arm64"
 OPENSSL_X86_64="$ROOT_DIR/macos-openssl-x86_64"
 
 PROJECT_DIR="$ROOT_DIR/slipstream-rust"
-DIST_DIR="$PROJECT_DIR/dist"
+DIST_DIR="$PWD/dist"
 
 # ==============================================================================
 # SYSTEM RUNTIME HELPERS
